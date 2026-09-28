@@ -1,0 +1,16 @@
+faster-whisper
+pyaudiowpatch
+webrtcvad-wheels
+PyQt6
+keyboard
+anthropic
+httpx
+numpy
+soxr
+pyyaml
+pypdf
+nvidia-cublas-cu12
+nvidia-cudnn-cu12==9.*
+sherpa-onnx
+pycaw
+comtypes

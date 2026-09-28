@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+build/
+dist/
+
+# Everything below is personal: created on your machine, never committed.
+# transcripts, logs, models, caches
+data/
+# your call notes
+meetings/
+# your settings (template: config.example.yaml)
+config.yaml
+# your profile + what Cue learned from your calls + voice fingerprints
+profiles/me.md
+profiles/voice.md
+profiles/learned.md
+profiles/speakers/
+profiles/work/*.md
+profiles/work/*.txt
+!profiles/work/*.example.md
+profiles/interview/*
+!profiles/interview/README.md
