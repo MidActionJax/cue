@@ -25,14 +25,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # running from source
 
 from cue import config  # noqa: E402
 from worklog import prompts, workstreams  # noqa: E402
 from worklog.extract import extract  # noqa: E402
 from worklog.summarize import ClaudeError, Writer  # noqa: E402
 
+ROOT = config.ROOT  # your data home
 WL = ROOT / "data" / "worklog"
 OUT = ROOT / "profiles" / "work"
 STATE = WL / "state.json"

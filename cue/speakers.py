@@ -14,10 +14,13 @@ import threading
 
 import numpy as np
 
-from .config import DATA, ROOT
+from .config import BUNDLED_MODELS, DATA, ROOT
 
 log = logging.getLogger(__name__)
-MODEL = DATA / "models" / "wespeaker_en_voxceleb_resnet34_LM.onnx"
+_MODEL_NAME = "wespeaker_en_voxceleb_resnet34_LM.onnx"
+# shipped inside the app; older setups downloaded it into the data folder
+MODEL = next((p for p in (BUNDLED_MODELS / _MODEL_NAME, DATA / "models" / _MODEL_NAME) if p.exists()),
+             BUNDLED_MODELS / _MODEL_NAME)
 PROFILES = ROOT / "profiles" / "speakers"
 ME_FILE = PROFILES / "_me.npy"
 

@@ -7,6 +7,7 @@
   <img alt="Python" src="https://img.shields.io/badge/python-3.11-2b3a55?style=flat-square">
   <img alt="Status" src="https://img.shields.io/badge/status-beta-4cd97b?style=flat-square">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-8fb4ff?style=flat-square">
+  <a href="https://github.com/MidActionJax/cue/releases"><img alt="Download" src="https://img.shields.io/github/v/release/MidActionJax/cue?include_prereleases&label=download&style=flat-square&color=4cd97b"></a>
 </p>
 
 **Cue is a real-time copilot for calls.** It listens to your meeting, transcribes everyone
@@ -89,20 +90,42 @@ needed (one is supported if you have it).
 
 ## Getting started
 
-> **Beta.** Cue runs from source today. A one-click installer is on the [roadmap](#roadmap).
+**You need:** Windows 10/11 · an NVIDIA GPU (built on an RTX 3060, 12 GB) ·
+[Claude Code](https://docs.claude.com/en/docs/claude-code) logged in to your Claude account
+(`claude auth login`) · [Ollama](https://ollama.com) with `ollama pull qwen2.5:7b` (the local
+fallback) · ~6 GB of disk.
 
-**You need:** Windows 10/11 · Python 3.11 · an NVIDIA GPU (built on an RTX 3060, 12 GB) ·
-[Claude Code](https://docs.claude.com/en/docs/claude-code) logged in to your Claude account ·
-[Ollama](https://ollama.com) (for the local fallback) · ~10 GB of disk for the models.
+### Install (recommended)
+
+1. Download **`Cue-Setup-<version>.exe`** from the [latest release](https://github.com/MidActionJax/cue/releases).
+2. Run it. No admin rights needed. It asks two things: where to install the app (~2 GB, mostly
+   GPU libraries) and **where to keep your data** (settings, profiles, call notes, and the
+   Whisper model, downloaded on first use). Put both on whichever drive has room.
+3. Open **Cue** from the Start menu or desktop.
+
+The installer also schedules the daily work-brief refresh (7:30 AM). Uninstalling removes the
+app and that task and **leaves your data folder alone**. Upgrading keeps everything.
+
+> **Beta:** the installer isn't code-signed yet, so Windows SmartScreen may warn on first run.
+> Choose *More info → Run anyway*.
+
+<details>
+<summary><b>Run from source instead</b> (Python 3.11)</summary>
 
 ```powershell
 git clone https://github.com/MidActionJax/cue.git
 cd cue
 powershell -ExecutionPolicy Bypass -File setup.ps1   # venv, dependencies, models, daily job, desktop shortcut
-claude auth login                                    # once, if the Claude CLI isn't logged in
 ```
 
-Then fill in the three small files that setup created from templates (all private, git-ignored):
+To build the app and installer yourself: `packaging\build.ps1 -Out D:\CueBuild` (needs
+`pip install pyinstaller` and [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
+
+</details>
+
+### Set it up
+
+Fill in the three small files that Cue created from templates in your data folder (all private):
 
 | File | What goes in it |
 |---|---|
@@ -113,8 +136,12 @@ Then fill in the three small files that setup created from templates (all privat
 Build your work memory once (after that it updates itself at 7:30 every morning):
 
 ```powershell
-.\worklog.cmd --backfill
+& "$env:LOCALAPPDATA\Programs\Cue\cue-cli.exe" worklog --backfill   # installed (or wherever you put it)
+.\worklog.cmd --backfill                                             # from source
 ```
+
+`cue-cli.exe` is the command-line side of the app: `worklog`, `note "…"`, `prep`,
+`accent-test`, `devices`. `Cue.exe --quit` ends a running Cue's call (notes saved) and closes it.
 
 **Before your first call:** open **Cue** from the desktop and pick **Work**. When people talk,
 the **Them** light should turn green (click it to pick your call's audio device). Then click
@@ -151,21 +178,23 @@ to `stt.accurate_speakers` to route only their speech through the slower, more a
 `large-v3` model.
 
 **Interviews.** Drop your resume and the job description (`job.md`) into `profiles/interview/`
-and run `prep.cmd`. You get a 30-second intro, likely questions with talking points in your
+and run `cue-cli prep` (`prep.cmd` from source). You get a 30-second intro, likely questions with talking points in your
 voice, STAR stories from your real history, and questions to ask them. Practice mode quizzes you on them.
 
-**Quick notes.** Work that never touched Claude: `note.cmd "restarted the nightly cron"`, or
+**Quick notes.** Work that never touched Claude: `cue-cli note "restarted the nightly cron"`, or
 tray → *Add a quick note…*. It goes into tomorrow's brief.
 
 **Accents.** To measure the transcriber on a specific person, record a clip where they talk and
-compare models side by side: `accent_test.cmd "meeting.mp4" --start 120 --length 60`.
+compare models side by side: `cue-cli accent-test "meeting.mp4" --start 120 --length 60`.
 
 ---
 
 ## Your data
 
-- **Stays on your machine:** audio (never saved), transcripts, notes, voice fingerprints, what Cue
-  learned, and your work brief. All of it is git-ignored.
+- **Stays on your machine**, in the data folder you picked at install (`%USERPROFILE%\Cue` by
+  default; the repo folder when running from source): audio (never saved), transcripts, notes,
+  voice fingerprints, what Cue learned, and your work brief. To move it, move the folder and edit
+  the path in `cue_home.txt` next to `Cue.exe`.
 - **Sent to Claude** (through your own account): transcript snippets when you ask for an answer,
   and your summaries/notes when they're generated. Set `llm.backend: ollama` and
   `notes.live_backend: local` to keep live calls fully offline.
@@ -196,10 +225,10 @@ Everything lives in `config.yaml`, and every option is commented. The usual knob
 | **Them** light never turns green | click it and pick the device your call audio plays through |
 | Title shows `Listening · local` | Claude is unavailable (login or usage limit), so answers come from the local model. Run `claude auth login` |
 | Your own speech shows as "In room" | redo **Set up my voice**, or lower `stt.voice_match` |
-| Answers feel generic | run `worklog.cmd`, then fill in `profiles/me.md` and `workstreams.md` |
-| Something went wrong on a call | tray → *Open app log* (`data/logs/app-<date>.log`) |
-| Panel is off-screen | delete `data/ui_state.json` |
-| Try it without a call | `run.cmd --demo --mode work` |
+| Answers feel generic | run `cue-cli worklog`, then fill in `profiles/me.md` and `workstreams.md` |
+| Something went wrong on a call | tray → *Open app log* (`data/logs/app-<date>.log` in your data folder) |
+| Panel is off-screen | delete `data/ui_state.json` in your data folder |
+| Try it without a call | `Cue.exe --demo --mode work` (or `run.cmd --demo --mode work` from source) |
 
 </details>
 
@@ -207,7 +236,9 @@ Everything lives in `config.yaml`, and every option is commented. The usual knob
 
 ## Roadmap
 
-- [ ] **One-click Windows installer**: a compiled app (no Python needed), with first-run setup inside the UI
+- [x] **Windows installer**: a compiled app, no Python needed
+- [ ] First-run setup inside the app (name, teammates, workstreams) instead of editing files
+- [ ] Code-signed builds and auto-update
 - [ ] Settings window (devices, names, triggers) instead of editing YAML
 - [ ] Calendar awareness: know who's on the call and the agenda before it starts
 - [ ] Per-speaker transcription tuning that adapts to each accent over time
@@ -222,7 +253,8 @@ Everything lives in `config.yaml`, and every option is commented. The usual knob
 cue/          the app: audio, speech-to-text, speakers, triggers, LLM backends, panel, notes, practice
 worklog/      the daily job: chat history + git + notes → daily notes → weekly → brief (+ fact-check) → history
 profiles/     your context (templates ship as *.example.md; your copies stay private)
-assets/       logo, icon, screenshots (tools/ regenerates them)
+assets/       logo, icon, splash, installer art, screenshots (tools/ regenerates them)
+packaging/    PyInstaller spec + Inno Setup installer (build.ps1 builds both)
 ```
 
 Built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper),

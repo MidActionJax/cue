@@ -111,6 +111,7 @@ overlay:
   tint: "#141821"
   tint_alpha: 150             # 0-255 darkness of the glass
   hide_from_screen_share: true   # overlay is invisible to Teams/Zoom/OBS screen capture
+  show_in_taskbar: true       # a taskbar button with the Cue icon (false = tray only)
   user_speech_min_s: 0.6      # you must talk this long before the fade logic arms
   fade_after_user_silence_s: 2.5
   max_visible_s: 120          # safety: fade even if you never answered

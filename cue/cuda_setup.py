@@ -2,6 +2,7 @@
 
 faster-whisper / CTranslate2 need cuBLAS + cuDNN 9 DLLs. Installing them via pip avoids a
 system-wide CUDA toolkit install, but Windows won't find them unless we add their bin dirs.
+In the compiled app they're bundled under <app>/_internal/nvidia/*/bin.
 """
 import glob
 import os
@@ -12,9 +13,14 @@ import sys
 def add_cuda_dlls() -> list[str]:
     if os.name != "nt":
         return []
-    roots = list(site.getsitepackages()) + [site.getusersitepackages(), sys.prefix]
+    roots = [getattr(sys, "_MEIPASS", "")]
+    try:
+        roots += list(site.getsitepackages()) + [site.getusersitepackages()]
+    except AttributeError:  # frozen apps may not have a full site module
+        pass
+    roots.append(sys.prefix)
     added = []
-    for root in roots:
+    for root in filter(None, roots):
         for d in glob.glob(os.path.join(root, "**", "nvidia", "*", "bin"), recursive=True):
             if d in added:
                 continue

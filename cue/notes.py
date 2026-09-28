@@ -4,8 +4,8 @@ During the call the transcript is appended to data/calls/<stamp>.txt, and every 
 part is folded into running notes in meetings/<stamp>.md (Haiku, via `claude -p`). When the
 call ends, a detached process writes the polished final version (Sonnet), so quitting is instant:
 
-    python -m cue.notes finalize <stamp>     (one call)
-    python -m cue.notes recover              (any call that was never finalized)
+    Cue.exe notes finalize <stamp>     (one call)
+    Cue.exe notes recover              (any call that was never finalized)
 
 The worklog job picks meetings/*.md up, so calls land in your work history too.
 """
@@ -254,8 +254,8 @@ def _live_llm(prompt: str, cfg, llm_cfg) -> str:
 
 def spawn_detached(*args: str) -> None:
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    subprocess.Popen([sys.executable, "-m", "cue.notes", *args], cwd=ROOT, creationflags=flags,
-                     close_fds=True)
+    from .cli import self_cmd, self_cwd
+    subprocess.Popen(self_cmd("notes", *args), cwd=self_cwd(), creationflags=flags, close_fds=True)
 
 
 def _mark_done(stamp: str) -> None:
@@ -355,13 +355,19 @@ def learn(cfg, transcript: str, mode: str, start: datetime) -> None:
         path.write_text(new.strip() + "\n", encoding="utf-8")
 
 
-if __name__ == "__main__":
+def cli(args: list[str]) -> int:
     (DATA / "logs").mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname).1s %(message)s",
                         handlers=[logging.FileHandler(DATA / "logs" / "notes.log", encoding="utf-8")])
-    if len(sys.argv) >= 3 and sys.argv[1] == "finalize":
-        finalize(sys.argv[2])
-    elif len(sys.argv) >= 2 and sys.argv[1] == "recover":
+    if len(args) >= 2 and args[0] == "finalize":
+        finalize(args[1])
+    elif args and args[0] == "recover":
         recover()
     else:
         print(__doc__)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(cli(sys.argv[1:]))

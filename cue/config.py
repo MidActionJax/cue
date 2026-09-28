@@ -1,12 +1,46 @@
-"""Loads config.yaml into attribute-accessible nested dicts."""
+"""Paths + config loading.
+
+Two places matter:
+  APP_DIR  where Cue's code and bundled files live (the repo, or the installed app folder).
+           Read-only: assets, templates, bundled models.
+  ROOT     your data home: config.yaml, profiles/, meetings/, data/ (transcripts, logs, caches),
+           models/ (Whisper downloads). Chosen by, in order:
+             1. the CUE_HOME environment variable
+             2. a cue_home.txt file next to Cue.exe / in the repo, containing a folder path
+             3. the repo itself (running from source) or %USERPROFILE%\\Cue (installed app)
+"""
 from __future__ import annotations
 
+import os
+import shutil
+import sys
 from pathlib import Path
 
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
+FROZEN = bool(getattr(sys, "frozen", False))
+APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+EXE_DIR = Path(sys.executable).resolve().parent if FROZEN else APP_DIR
+
+
+def _find_home() -> Path:
+    if os.environ.get("CUE_HOME"):
+        return Path(os.environ["CUE_HOME"])
+    for d in (EXE_DIR, APP_DIR):
+        pointer = d / "cue_home.txt"
+        if pointer.exists():
+            text = pointer.read_text(encoding="utf-8-sig").strip()  # the installer writes a BOM
+            if text:
+                return Path(text)
+    return Path.home() / "Cue" if FROZEN else APP_DIR
+
+
+ROOT = _find_home()
 DATA = ROOT / "data"
+ASSETS = APP_DIR / "assets"
+BUNDLED_MODELS = APP_DIR / "models"
+# Whisper models download into the data home (can be GBs; keeps them off the system drive)
+os.environ.setdefault("HF_HOME", str(ROOT / "models" / "hf"))
 
 
 class Cfg(dict):
@@ -29,13 +63,14 @@ USER_FILES = [
     ("profiles/me.example.md", "profiles/me.md"),
     ("profiles/work/notes.example.md", "profiles/work/notes.md"),
     ("profiles/work/workstreams.example.md", "profiles/work/workstreams.md"),
+    ("profiles/interview/README.md", "profiles/interview/README.md"),
 ]
 
 
 def ensure_user_files() -> None:
-    import shutil
+    DATA.mkdir(parents=True, exist_ok=True)
     for src, dst in USER_FILES:
-        s, d = ROOT / src, ROOT / dst
+        s, d = APP_DIR / src, ROOT / dst
         if s.exists() and not d.exists():
             d.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(s, d)
@@ -50,5 +85,6 @@ def load(path: Path | None = None) -> Cfg:
 
 
 def resolve(p: str | Path) -> Path:
+    """Paths in config.yaml are relative to your data home."""
     p = Path(p)
     return p if p.is_absolute() else ROOT / p

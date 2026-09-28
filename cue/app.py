@@ -6,7 +6,6 @@ import logging
 import os
 import re
 import subprocess
-import sys
 import threading
 import time
 from datetime import datetime
@@ -16,7 +15,8 @@ from PyQt6.QtGui import QAction, QActionGroup, QCursor, QIcon
 from PyQt6.QtWidgets import QApplication, QInputDialog, QMenu, QSystemTrayIcon
 
 from . import prompts
-from .config import ROOT, resolve
+from .cli import self_cmd, self_cwd
+from .config import ASSETS, ROOT, resolve
 from .context import load_context, load_vocabulary
 from .llm import ClaudeCLIBackend, OllamaBackend, make_backend, make_local
 from .notes import NoteTaker, spawn_detached
@@ -84,6 +84,7 @@ class Controller(QObject):
         self._silence_since: float | None = None
         self._last_tick = time.monotonic()
         self._refreshing = False
+        self._quitting = False
         self._brief_mtime = self._mtime(BRIEF)
         self._next_brief_check = 0.0
 
@@ -584,7 +585,7 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
     def _name_speaker(self, label: str):
         if not self.speakers:
             return
-        name, ok = QInputDialog.getText(None, "Who is this?", f"Name for {label} (their voice is remembered):")
+        name, ok = QInputDialog.getText(None, "Cue — who is this?", f"Name for {label} (their voice is remembered):")
         name = name.strip()
         if not ok or not name:
             return
@@ -597,7 +598,7 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
 
     def _quick_note(self):
         from .journal import add
-        text, ok = QInputDialog.getText(None, "Quick work note", "What did you do? (goes into your work history)")
+        text, ok = QInputDialog.getText(None, "Cue — quick work note", "What did you do? (goes into your work history)")
         if ok and text.strip():
             add(text)
             self.overlay.show_status("Noted — it'll be in tomorrow's work log", 2500)
@@ -710,7 +711,7 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
 
     # ------------------------------------------------------------------ tray
     def _build_tray(self):
-        self.tray = QSystemTrayIcon(QIcon(str(ROOT / "assets" / "cue.ico")))
+        self.tray = QSystemTrayIcon(QIcon(str(ASSETS / "cue.ico")))
         menu = QMenu()
         menu.addAction("Answer now", lambda: self.ask("manual"))
         menu.addSeparator()
@@ -746,7 +747,15 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         menu.addSeparator()
         menu.addAction("End call && quit", self.quit)
         self.tray.setContextMenu(menu)
+        self.tray.setToolTip("Cue")
         self.tray.show()
+        state = load_ui_state()
+        if not state.get("welcomed"):  # first run: say where Cue lives
+            self.tray.showMessage("Cue is running", "Press Tab when you're asked something. "
+                                  "Right-click this icon for devices, notes and settings.",
+                                  QIcon(str(ASSETS / "cue.ico")), 6000)
+            state["welcomed"] = True
+            save_ui_state(state)
 
     def _refresh_tray(self):
         for a in self.mode_group.actions():
@@ -773,7 +782,7 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
 
         def run():
             self.bridge.status.emit("Updating last week's summary from your Claude sessions (~2 min)…", 150_000)
-            r = subprocess.run([sys.executable, "-m", "worklog"], cwd=ROOT, capture_output=True, text=True,
+            r = subprocess.run(self_cmd("worklog"), cwd=self_cwd(), capture_output=True, text=True,
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             self._refreshing = False
             ok = r.returncode == 0
@@ -786,7 +795,7 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
     def build_interview_prep(self):
         def run():
             self.bridge.status.emit("Building interview prep from your resume + history (~2 min)…", 150_000)
-            r = subprocess.run([sys.executable, "-m", "worklog.interview_prep"], cwd=ROOT, capture_output=True,
+            r = subprocess.run(self_cmd("prep"), cwd=self_cwd(), capture_output=True,
                                text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             log.info("interview prep rc=%s\n%s", r.returncode, (r.stdout + r.stderr)[-1000:])
             self.bridge.status.emit("Interview prep ready (profiles/interview/prep.md)" if r.returncode == 0
@@ -806,7 +815,18 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         except Exception:
             pass
 
+    def bring_back(self):
+        """Cue was launched again while running: surface the panel instead of a second copy."""
+        if self.overlay.minimized:
+            self.overlay.toggle_minimized()
+        self.overlay.show()
+        self.overlay.show_status("Cue is already running", 2500)
+
     def quit(self):
+        if self._quitting:
+            return
+        self._quitting = True
+        log.info("quitting")
         if self.practice:
             self.practice.stop()
         self.shutdown()
@@ -816,7 +836,10 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
             self.audio.stop()
         self.backend.close()
         self.tray.hide()
-        QApplication.quit()
+        log.info("call saved, exiting")
+        # not quit(): in Qt 6 that first asks each window to close, and the panel refuses
+        # (its close routes back here), which cancels the quit
+        QApplication.exit(0)
 
 
 def _short(device: str) -> str:

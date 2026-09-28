@@ -18,7 +18,7 @@ if (-not (Test-Path $py)) {
 & $py -c "import sys; sys.path.insert(0, r'$root'); from cue.config import ensure_user_files; ensure_user_files()"
 
 # Voice-fingerprint model (who's talking / is it you) and the local fallback model
-$model = Join-Path $root "data\models\wespeaker_en_voxceleb_resnet34_LM.onnx"
+$model = Join-Path $root "models\wespeaker_en_voxceleb_resnet34_LM.onnx"
 if (-not (Test-Path $model)) {
     New-Item -ItemType Directory -Force (Split-Path $model) | Out-Null
     Invoke-WebRequest -Uri "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx" -OutFile $model

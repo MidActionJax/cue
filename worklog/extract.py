@@ -15,7 +15,9 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 HOME = Path.home()
-MEETINGS = Path(__file__).resolve().parent.parent / "meetings"
+from cue.config import ROOT as _HOME
+
+MEETINGS = _HOME / "meetings"
 
 
 def transcript_roots() -> list[Path]:
@@ -196,7 +198,7 @@ def git_commits(repos: set[Path], since: date, until: date) -> dict[date, list[s
     return out
 
 
-KNOWN_REPOS = Path(__file__).resolve().parent.parent / "data" / "worklog" / "repos.json"
+KNOWN_REPOS = _HOME / "data" / "worklog" / "repos.json"
 
 
 def repo_roots(sessions: dict[str, Session]) -> set[Path]:

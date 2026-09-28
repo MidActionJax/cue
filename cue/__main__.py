@@ -23,6 +23,21 @@ DEMO = [
 _handler_ref = None
 
 
+def _splash():
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QPixmap
+    from PyQt6.QtWidgets import QSplashScreen
+    pm = QPixmap(str(config.ASSETS / "splash.png"))
+    if pm.isNull():
+        return None
+    pm.setDevicePixelRatio(2.0)  # rendered at 2x for crisp text
+    s = QSplashScreen(pm, Qt.WindowType.WindowStaysOnTopHint)
+    s.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)  # rounded corners
+    s.show()
+    QApplication.processEvents()
+    return s
+
+
 def _on_console_close(save) -> None:
     """Closing the console window (its X) kills the process ~5 s later without any Qt event.
     Catch it so the call's notes and learning still get saved."""
@@ -37,7 +52,7 @@ def _on_console_close(save) -> None:
             try:
                 save()
             finally:
-                os._exit(0)
+                _hard_exit(0)
         return False
 
     _handler_ref = handler  # must stay referenced or ctypes frees it
@@ -49,28 +64,47 @@ def main():
     ap.add_argument("--devices", action="store_true", help="list audio devices and exit")
     ap.add_argument("--demo", action="store_true", help="no audio: inject a fake question to test overlay + LLM")
     ap.add_argument("--mode", choices=["work", "interview"], help="skip the Work/Interview chooser")
+    ap.add_argument("--quit", action="store_true", help="end the running Cue's call (notes saved) and exit")
     args = ap.parse_args()
 
     logs = config.DATA / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname).1s %(name)s: %(message)s",
                         datefmt="%H:%M:%S", handlers=[
-                            logging.StreamHandler(),
-                            logging.FileHandler(logs / f"app-{time.strftime('%Y-%m-%d')}.log", encoding="utf-8")])
+                            logging.FileHandler(logs / f"app-{time.strftime('%Y-%m-%d')}.log", encoding="utf-8"),
+                            # the compiled app has no console
+                            *([logging.StreamHandler()] if sys.stderr else [])])
     if args.devices:
         from .audio import list_devices
         list_devices()
         return
 
     cfg = config.load()
+    # its own taskbar identity (icon + grouping) instead of "python.exe"
+    import ctypes
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("MidActionJax.Cue")
     app = QApplication(sys.argv)
+    from .instance import InstanceServer, send_to_running
+    if send_to_running("quit" if args.quit else "show"):
+        return  # the running Cue handles it; don't start a second copy
+    if args.quit:
+        return  # nothing running
+    splash = _splash()
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Cue")
     from PyQt6.QtGui import QIcon
-    app.setWindowIcon(QIcon(str(config.ROOT / "assets" / "cue.ico")))
+    app.setWindowIcon(QIcon(str(config.ASSETS / "cue.ico")))
     from .app import Controller
     ctl = Controller(cfg, audio=not args.demo, mode=args.mode)
+    if splash:
+        QTimer.singleShot(1200, lambda: splash.finish(ctl.overlay))
     _on_console_close(ctl.shutdown)
+    instance = InstanceServer()
+    def on_message(msg: str):
+        logging.getLogger(__name__).info("another launch asked: %s", msg or "show")
+        ctl.quit() if msg == "quit" else ctl.bring_back()
+    instance.message.connect(on_message)
+    app.aboutToQuit.connect(ctl.shutdown)  # sign-out / shutdown: still save the call
 
     if args.demo:
         from .audio import Utterance
@@ -83,8 +117,23 @@ def main():
         QTimer.singleShot(6000, inject)
 
     code = app.exec()
-    sys.stdout.flush()
-    os._exit(code)  # skip interpreter teardown: audio/STT threads are daemons and native libs complain
+    logging.getLogger(__name__).info("bye")
+    _hard_exit(code)
+
+
+def _hard_exit(code: int) -> None:
+    """Everything is saved by now. Skip interpreter teardown (audio/STT threads are daemons) and
+    DLL unload too: os._exit's ExitProcess can hang in the CUDA/ONNX libraries' unload handlers
+    while a worker thread is mid-inference."""
+    logging.shutdown()
+    sys.stdout and sys.stdout.flush()
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.windll.kernel32
+    k32.GetCurrentProcess.restype = wintypes.HANDLE
+    k32.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    k32.TerminateProcess(k32.GetCurrentProcess(), code)
+    os._exit(code)
 
 
 if __name__ == "__main__":

@@ -53,6 +53,23 @@ def main():
     write_ico(ASSETS / "cue.ico", [render(logo, s) for s in (16, 24, 32, 48, 64, 128, 256)])
     if (ASSETS / "banner.svg").exists():
         render(ASSETS / "banner.svg", 1280, 400).save(str(ASSETS / "banner.png"))
+    if (ASSETS / "splash.svg").exists():  # 2x for sharp text on high-DPI screens
+        render(ASSETS / "splash.svg", 1120, 440).save(str(ASSETS / "splash.png"))
+    # installer wizard art (Inno Setup wants 24-bit BMPs): tall side panel + small corner logo
+    side = QImage(328, 628, QImage.Format.Format_RGB32)
+    p = QPainter(side)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.fillRect(side.rect(), Qt.GlobalColor.black)
+    QSvgRenderer(str(ASSETS / "installer_side.svg")).render(p)
+    p.end()
+    side.save(str(ASSETS / "installer_side.bmp"))
+    small = QImage(110, 110, QImage.Format.Format_RGB32)
+    small.fill(Qt.GlobalColor.white)
+    p = QPainter(small)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    QSvgRenderer(str(logo)).render(p)
+    p.end()
+    small.save(str(ASSETS / "installer_small.bmp"))
     print("assets written to", ASSETS)
 
 

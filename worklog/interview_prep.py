@@ -13,13 +13,13 @@ import sys
 from datetime import date
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # running from source
 
 from cue import config  # noqa: E402
 from cue.context import load_context  # noqa: E402
 from worklog.summarize import claude_p  # noqa: E402
 
+ROOT = config.ROOT  # your data home
 OUT = ROOT / "profiles" / "interview" / "prep.md"
 log = logging.getLogger("interview_prep")
 

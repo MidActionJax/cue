@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import re
 from datetime import date
-from pathlib import Path
 
-PATH = Path(__file__).resolve().parent.parent / "profiles" / "work" / "workstreams.md"
+from cue.config import ROOT as _HOME
+
+PATH = _HOME / "profiles" / "work" / "workstreams.md"
 _JOB_HEADING = "## Job"
 
 

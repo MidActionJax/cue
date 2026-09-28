@@ -18,11 +18,11 @@ from ctypes import wintypes
 from urllib.parse import unquote
 
 from PyQt6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QRectF, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen
+from PyQt6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton, QTextBrowser,
                              QVBoxLayout, QWidget)
 
-from .config import DATA
+from .config import ASSETS, DATA
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ dwmapi = ctypes.windll.dwmapi
 GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_NOACTIVATE = 0x08000000
+WS_EX_APPWINDOW = 0x00040000
 WDA_EXCLUDEFROMCAPTURE = 0x11
 DWMWA_WINDOW_CORNER_PREFERENCE = 33
 DWMWCP_ROUND = 2
@@ -167,7 +168,13 @@ class TitleBar(QWidget):
                      Dot("#28c840", "+", "Live transcript & notes")]
         for d in self.dots:
             lay.addWidget(d)
-        lay.addSpacing(6)
+        lay.addSpacing(8)
+        mark = QLabel()
+        mark.setPixmap(QPixmap(str(ASSETS / "icon-64.png")).scaled(
+            18, 18, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        mark.setToolTip("Cue")
+        lay.addWidget(mark)
+        lay.addSpacing(2)
         self.title = QLabel()
         self.title.setStyleSheet(f"color:{MUTED}; font:12px 'Segoe UI';")
         lay.addWidget(self.title, 1)
@@ -273,8 +280,12 @@ class Overlay(QWidget):
     close_clicked = pyqtSignal()
 
     def __init__(self, cfg):
-        super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
-                         | Qt.WindowType.Tool | Qt.WindowType.WindowDoesNotAcceptFocus)
+        flags = (Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+                 | Qt.WindowType.WindowDoesNotAcceptFocus)
+        if not cfg.get("show_in_taskbar", True):
+            flags |= Qt.WindowType.Tool
+        super().__init__(None, flags)
+        self.setWindowTitle("Cue")
         self.cfg = cfg
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
@@ -337,9 +348,20 @@ class Overlay(QWidget):
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 4, 0, 0)
-        q = QLabel("What kind of call is this?")
-        q.setStyleSheet(f"color:{TEXT}; font:600 {int(self.fs * 1.1)}px 'Segoe UI';")
-        lay.addWidget(q)
+        head = QHBoxLayout()
+        head.setSpacing(12)
+        logo = QLabel()
+        logo.setPixmap(QPixmap(str(ASSETS / "logo-512.png")).scaled(
+            44, 44, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        head.addWidget(logo)
+        words = QLabel(f"<div style='font:700 {int(self.fs * 1.5)}px Segoe UI; color:{TEXT}'>Cue</div>"
+                       f"<div style='font:{int(self.fs * 0.85)}px Segoe UI; color:{MUTED}'>"
+                       "What kind of call is this?</div>")
+        words.setTextFormat(Qt.TextFormat.RichText)
+        head.addWidget(words)
+        head.addStretch(1)
+        lay.addLayout(head)
+        lay.addSpacing(4)
         row = QHBoxLayout()
         row.setSpacing(12)
         big = ("QPushButton{color:%s; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.14);"
@@ -436,11 +458,20 @@ class Overlay(QWidget):
         super().showEvent(e)
         hwnd = int(self.winId())
         ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
+        # never steal focus; with show_in_taskbar Cue gets a taskbar button with its icon
+        ex |= WS_EX_NOACTIVATE
+        ex = (ex | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW if self.cfg.get("show_in_taskbar", True) \
+            else ex | WS_EX_TOOLWINDOW
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
         if self.cfg.hide_from_screen_share:
             user32.SetWindowDisplayAffinity(wintypes.HWND(hwnd), WDA_EXCLUDEFROMCAPTURE)
         if self.cfg.acrylic and not self.acrylic:
             self.acrylic = _enable_acrylic(hwnd, self.tint, self.cfg.tint_alpha)
+
+    def closeEvent(self, e):
+        # taskbar "Close window", Alt+F4, Windows asking the app to close: end the call properly
+        e.ignore()
+        self.close_clicked.emit()
 
     def paintEvent(self, e):
         p = QPainter(self)

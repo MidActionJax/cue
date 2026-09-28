@@ -87,6 +87,7 @@ def main():
         report.append(f"## {name}\n_{line}_\n\n{text}\n")
         del model
     out = config.DATA / "accent_test.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(report), encoding="utf-8")
     print(f"\nSaved side-by-side to {out}")
 
