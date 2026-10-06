@@ -18,6 +18,7 @@ import logging
 import re
 import sys
 from datetime import date, datetime
+from fnmatch import fnmatch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # running from source
@@ -91,7 +92,7 @@ def read_rows(folder: Path, only: list[str] = ()) -> list[dict]:
     import openpyxl
     rows = []
     for f in sorted(folder.glob("*.xlsx")):
-        if f.name.startswith(("~$", ".~")) or (only and f.name not in only):
+        if f.name.startswith(("~$", ".~")) or (only and not any(fnmatch(f.name, pat) for pat in only)):
             continue
         try:
             wb = openpyxl.load_workbook(f, read_only=True, data_only=True)

@@ -237,8 +237,10 @@ class Controller(QObject):
             from .speakers import Speakers
             if Speakers.available():
                 v = stt_cfg.voice_match
-                # "is this you" is a bit more forgiving: your voice on a different day/mic still passes
-                self.speakers = Speakers(me_threshold=v - 0.05, match_threshold=v + 0.05, new_threshold=v)
+                # "is this you" is a bit more forgiving: your voice on a different day/mic still passes.
+                # A distant mic (webcam) gives weaker matches: lower stt.me_match on its own for that.
+                me = stt_cfg.get("me_match") or v - 0.05
+                self.speakers = Speakers(me_threshold=me, match_threshold=v + 0.05, new_threshold=v)
         self.overlay.set_voice_status("🗣 Voice set up ✓" if self.speakers and self.speakers.me is not None
                                       else "🗣 Set up my voice")
         self.stt = Transcriber(stt_cfg, lambda u, t: self.bridge.text.emit(u, t),

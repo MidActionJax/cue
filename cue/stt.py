@@ -29,6 +29,15 @@ _HALLUCINATIONS = re.compile(
 _FILLER_ONLY = re.compile(r"^\s*(you|thank you|thanks)[.!]?\s*$", re.I)
 
 
+def _has_words(text: str) -> bool:
+    return bool(re.search(r"[A-Za-z0-9]", text or ""))
+
+
+def _clean_context(text: str) -> str:
+    """Recent transcript used as Whisper's hint, minus runs of dots/ellipses (they breed more)."""
+    return re.sub(r"\s{2,}", " ", re.sub(r"(?:\s*[.…]\s*){2,}", " ", text)).strip()
+
+
 def _normalize(audio):
     """Bring quiet/far-from-mic speakers up to a consistent level (capped at 10x gain so
     near-silence isn't turned into loud noise). Whisper is noticeably worse on quiet audio."""
@@ -84,7 +93,7 @@ class Transcriber:
         # Written like earlier transcript text, with no label word: on noise Whisper tends to
         # repeat prompt words, and a label like "Glossary:" came back as "Glossary. Glossary."
         vocab = ", ".join(self.vocabulary[:60])
-        return " ".join(p for p in (f"{vocab}." if vocab else "", self._context[-300:]) if p)
+        return " ".join(p for p in (f"{vocab}." if vocab else "", _clean_context(self._context)[-300:]) if p)
 
     def _run(self) -> None:
         self.load()
@@ -102,7 +111,7 @@ class Transcriber:
                 log.exception("transcription failed")
                 continue
             if text:
-                if utt.final and utt.source == "them":
+                if utt.final and utt.source == "them" and _has_words(text):
                     self._context = (self._context + " " + text)[-600:]
                 self.on_text(utt, text)
 
@@ -136,13 +145,34 @@ class Transcriber:
         # too quiet to be speech aimed at the mic (keyboard, fan, someone across the room)
         if float(np.sqrt(np.mean(utt.audio ** 2))) < self.cfg.min_rms:
             return ""
+        # names/jargon + recent context help with the other side's accents; your own mic gets
+        # no prompt, since on room noise Whisper just echoes the prompt back
+        prompt = (self._prompt() or None) if utt.source == "them" else None
+        text = self._decode(utt, prompt)
+        if prompt and utt.final and not _has_words(text) and dur >= 1.5:
+            # Whisper sometimes answers real speech with just ". . ." and, fed that back as context,
+            # keeps doing it for the rest of the call. Re-decode without any prompt.
+            retry = self._decode(utt, None)
+            if _has_words(retry):
+                log.info("transcript came back as punctuation; re-decoded without the prompt")
+                self._context = ""
+            text = retry
+        if not _has_words(text):
+            return ""
+        if _HALLUCINATIONS.match(text) and (dur < 2.5 or _FILLER_ONLY.match(text)):
+            return ""
+        if len(text.split()) / dur > 5.5:  # faster than anyone talks: invented from noise
+            return ""
+        if self._looks_invented(text):
+            return ""
+        return text
+
+    def _decode(self, utt: Utterance, prompt: str | None) -> str:
         segments, _info = self._model_for(utt).transcribe(
             _normalize(utt.audio),
             language=self.cfg.language or None,
             beam_size=self.cfg.beam_size if utt.final else 1,
-            # names/jargon + recent context help with the other side's accents; your own mic gets
-            # no prompt, since on room noise Whisper just echoes the prompt back
-            initial_prompt=(self._prompt() or None) if utt.source == "them" else None,
+            initial_prompt=prompt,
             condition_on_previous_text=False,
             without_timestamps=True,
             vad_filter=False,
@@ -153,14 +183,7 @@ class Transcriber:
             if (s.no_speech_prob > 0.6 and s.avg_logprob < -0.8) or s.avg_logprob < -1.2 or s.compression_ratio > 2.4:
                 continue
             out.append(s.text.strip())
-        text = " ".join(out).strip()
-        if _HALLUCINATIONS.match(text) and (dur < 2.5 or _FILLER_ONLY.match(text)):
-            return ""
-        if len(text.split()) / dur > 5.5:  # faster than anyone talks: invented from noise
-            return ""
-        if self._looks_invented(text):
-            return ""
-        return text
+        return " ".join(out).strip()
 
     def _looks_invented(self, text: str) -> bool:
         """Repetition loops ("Glossary. Glossary. Glossary.") and stretches copied straight out of the prompt.
