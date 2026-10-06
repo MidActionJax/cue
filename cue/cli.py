@@ -4,6 +4,8 @@
     Cue.exe worklog [--backfill] rebuild your work brief (what the 7:30 task runs)
     Cue.exe note "text"          quick work note
     Cue.exe prep                 build interview prep
+    Cue.exe prep-sbir "Pat Lee"   prep sheet for an SBIR call (person or organization)
+    Cue.exe sbir-sync            import your SBIR tracker spreadsheets into contacts.md
     Cue.exe accent-test FILE     compare Whisper models on a recording
     Cue.exe devices              list audio devices
     Cue.exe notes finalize|recover ...   (internal: finishing a call's notes)
@@ -45,6 +47,12 @@ def main() -> int:
     if cmd == "prep":
         from worklog.interview_prep import main as prep_main
         return prep_main()
+    if cmd == "prep-sbir":
+        from worklog.sbir_prep import main as sbir_prep_main
+        return sbir_prep_main(rest)
+    if cmd == "sbir-sync":
+        from worklog.sbir_sync import main as sbir_sync_main
+        return sbir_sync_main(rest)
     if cmd == "note":
         from .journal import add
         add(" ".join(rest))

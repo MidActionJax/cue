@@ -9,6 +9,7 @@ numpy
 soxr
 pyyaml
 pypdf
+openpyxl              # SBIR mode: reads your tracker spreadsheets (read-only)
 nvidia-cublas-cu12
 nvidia-cudnn-cu12==9.*
 sherpa-onnx

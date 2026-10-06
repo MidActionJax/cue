@@ -48,7 +48,32 @@ def _questions_from(path: str, heading_hint: str) -> list[str]:
     return out
 
 
+SBIR_STANDARD = [
+    "Tell me a little about yourself and what you do.",
+    "What do you charge for something like this?",
+    "Why would a company use you instead of a full-service SBIR firm?",
+    "How do you handle our proprietary data if you use AI tools?",
+    "What do you need from a company to get started?",
+    "Can we list you on our website as a partner?",
+]
+
+
+def default_kind() -> str:
+    """Practice from the start screen: rehearse for the call you prepped most recently
+    (an SBIR prep from the last few days wins over the weekly work questions)."""
+    sbir, interview = resolve("profiles/sbir/prep.md"), resolve("profiles/interview/prep.md")
+    if sbir.exists() and time.time() - sbir.stat().st_mtime < 3 * 86400 and \
+            (not interview.exists() or sbir.stat().st_mtime > interview.stat().st_mtime):
+        return "sbir"
+    return "work"
+
+
 def question_bank(kind: str) -> list[str]:
+    if kind == "sbir":
+        extra = _questions_from("profiles/sbir/prep.md", "question") or _questions_from("profiles/sbir/faq.md", "")
+        rest = extra + SBIR_STANDARD[1:]
+        random.shuffle(rest)
+        return [SBIR_STANDARD[0]] + list(dict.fromkeys(rest))
     if kind == "interview":
         extra = _questions_from("profiles/interview/prep.md", "question")
         rest = extra + INTERVIEW_STANDARD[1:]

@@ -187,12 +187,14 @@ class TitleBar(QWidget):
         self.mode_btns = {}
         seg = QHBoxLayout()
         seg.setSpacing(0)
-        for i, m in enumerate(("work", "interview")):
-            b = QPushButton(m.title())
+        segs = ("work", "interview", "sbir")
+        for i, m in enumerate(segs):
+            b = QPushButton("SBIR" if m == "sbir" else m.title())
             b.setCheckable(True)
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             radius = "border-top-right-radius:0; border-bottom-right-radius:0;" if i == 0 else \
-                     "border-top-left-radius:0; border-bottom-left-radius:0;"
+                     "border-top-left-radius:0; border-bottom-left-radius:0;" if i == len(segs) - 1 else \
+                     "border-radius:0;"
             b.setStyleSheet(_pill_style() + "QPushButton{%s}" % radius)
             b.clicked.connect(lambda _=False, m=m: panel.mode_clicked.emit(m))
             seg.addWidget(b)
@@ -269,7 +271,7 @@ def save_ui_state(state: dict) -> None:
 
 
 class Overlay(QWidget):
-    mode_clicked = pyqtSignal(str)      # "work" | "interview" | "practice"
+    mode_clicked = pyqtSignal(str)      # "work" | "interview" | "sbir" | "practice"
     devices_clicked = pyqtSignal(str)   # "them" | "me"
     script_toggled = pyqtSignal(bool)
     explain_clicked = pyqtSignal()
@@ -367,9 +369,10 @@ class Overlay(QWidget):
         big = ("QPushButton{color:%s; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.14);"
                " border-radius:12px; padding:14px; font:%dpx 'Segoe UI'; text-align:left;}"
                "QPushButton:hover{background:rgba(143,180,255,0.22); border-color:rgba(143,180,255,0.55);}")
-        for mode, title, sub in (("work", "Work", "Team call · answers from\nwhat I did · takes notes"),
-                                 ("interview", "Interview", "Answers every question\nfrom resume && history"),
-                                 ("practice", "Practice", "Rehearse out loud · it\ncoaches && learns my voice")):
+        for mode, title, sub in (("work", "Work", "Team call · answers\nfrom what I did"),
+                                 ("interview", "Interview", "Every question, from\nresume && history"),
+                                 ("sbir", "SBIR", "Partner or client call\n· offer, rules, prep"),
+                                 ("practice", "Practice", "Rehearse out loud,\nget coached")):
             b = QPushButton(f"{title}\n{sub}")
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             b.setStyleSheet(big % (TEXT, int(self.fs * 0.85)))

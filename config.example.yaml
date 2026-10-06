@@ -39,13 +39,24 @@ modes:
       - profiles/work/workstreams.md
       - profiles/work/last_week.md
       - profiles/work/all_time.md
+  sbir:
+    # SBIR/STTR consulting calls: referral partners (state programs, SBDCs, I-Corps hubs, firms)
+    # and founders/PIs. Mostly 1-on-1, so every question gets an answer.
+    trigger: auto
+    context:
+      - profiles/me.md
+      - profiles/voice.md
+      - profiles/learned.md
+      - profiles/sbir/              # intro, offer, proof, faq, contacts, prep (see its README)
+    # Read last, after all the context, so a long contacts file can't push it out of attention.
+    rules: profiles/sbir/rules.md
 
 hotkeys:
   # "someone just asked me something" — works in every trigger mode. The key still reaches
   # your other apps (Tab in a chat box still works); alt+tab / ctrl+tab don't trigger it.
   answer: tab                 # double-tap Tab = the same answer as a full script
   explain: shift+tab          # "what did they just say?" (plain-English rewrite of the last speaker)
-  toggle_mode: ctrl+alt+m     # interview <-> work
+  toggle_mode: ctrl+alt+m     # interview -> work -> sbir
   cycle_trigger: ctrl+alt+t   # auto -> smart -> name -> manual
   hide: ctrl+alt+h            # dismiss / bring back the last answer
   quit: ctrl+alt+q
@@ -147,3 +158,9 @@ worklog:
   daily_model: haiku          # one call per active day — haiku keeps backfills light on usage limits
   model: sonnet               # weekly summaries + the two main docs
   parallel: 2                 # concurrent claude -p calls during backfill
+
+# SBIR mode: import your pipeline spreadsheets into profiles/sbir/contacts.md (read-only, the
+# files are never written). Empty = off. Runs at the end of the daily job, or: cue-cli sbir-sync
+sbir:
+  tracker_dir: ""             # e.g. C:\Users\you\Desktop\SBIR
+  tracker_files: []           # only these .xlsx in that folder (empty = all of them)

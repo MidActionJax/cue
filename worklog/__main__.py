@@ -80,9 +80,22 @@ def main() -> int:
         return 0
     lock.write_text(str(os.getpid()))
     try:
-        return _run(args)
+        rc = _run(args)
+        _sbir_sync()  # no Claude involved, so it runs even when the summaries hit a usage limit
+        return rc
     finally:
         lock.unlink(missing_ok=True)
+
+
+def _sbir_sync() -> None:
+    folder = (config.load().get("sbir") or {}).get("tracker_dir")
+    if not folder:
+        return
+    try:
+        from worklog.sbir_sync import sync
+        sync(folder)
+    except Exception as e:
+        log.warning("SBIR tracker sync skipped: %s", e)
 
 
 def _run(args) -> int:

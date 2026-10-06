@@ -129,7 +129,8 @@ class Controller(QObject):
     # ------------------------------------------------------------------ setup
     def _set_mode(self, mode: str):
         if mode == "practice":
-            self.start_practice(self.mode or "work")
+            from .practice import default_kind
+            self.start_practice(self.mode or default_kind())
             return
         if self.practice:  # Work/Interview toggle during practice switches the question set
             self.start_practice(mode)
@@ -155,8 +156,16 @@ class Controller(QObject):
     def load_mode(self):
         if self.mode is None:
             return
-        context, files = load_context(self.cfg.modes[self.mode]["context"])
-        self._system = prompts.system_prompt(self.name, self.mode, context, self.cfg.user.aliases)
+        mcfg = self.cfg.modes[self.mode]
+        rules_file = mcfg.get("rules")
+        context, files = load_context(mcfg["context"], exclude=[rules_file] if rules_file else [])
+        rules = ""
+        if rules_file and resolve(rules_file).exists():
+            rules = load_context([rules_file])[0]
+            files.append(f"{rules_file} (rules, last)")
+        self._system = prompts.system_prompt(self.name, self.mode, context, self.cfg.user.aliases, rules)
+        if getattr(self, "stt", None):
+            self.stt.vocabulary = load_vocabulary(self.cfg.stt.vocabulary, self.mode)
         self.backend.configure(self._system)
         log.info("mode=%s trigger=%s backend=%s context=%d chars from %s",
                  self.mode, self.trigger, self.backend.name, len(context), files)
@@ -179,6 +188,10 @@ class Controller(QObject):
             self.overlay.set_home(header, grouped_html(groups + last_call_items(self.name), fs))
             if not brief_is_current():
                 self.refresh_worklog()  # e.g. Monday before the 7:30 task ran, or the PC was off
+        elif self.mode == "sbir":
+            from .sbir import home_items
+            header, groups = home_items()
+            self.overlay.set_home(header, grouped_html(groups, fs))
         else:
             names = ", ".join(os.path.basename(f) for f in files if "interview" in f) or "no files yet — add your resume to profiles/interview/"
             self.overlay.set_home("Interview mode", bullets_html([
@@ -375,7 +388,8 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
             streams = ", ".join(job_names()) or "their projects"
         except Exception:
             streams = "their projects"
-        prompt = self.SMART_Q.format(kind="team call" if self.mode == "work" else "interview", name=self.name,
+        kind = {"work": "team call", "sbir": "SBIR consulting call"}.get(self.mode, "interview")
+        prompt = self.SMART_Q.format(kind=kind, name=self.name,
                                      NAME=self.name.upper(), streams=streams,
                                      transcript=self.transcript.format(90, self.name))
         try:
@@ -437,7 +451,7 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
 
     def ask(self, kind: str, fmt: str | None = None, transcript: str | None = None, status: str = ""):
         if self.mode is None:
-            self.overlay.show_status("Pick Work, Interview or Practice first", 2000)
+            self.overlay.show_status("Pick Work, Interview, SBIR or Practice first", 2000)
             return
         fmt = fmt or ("EXPLAIN" if kind == "explain" else "SCRIPT" if self.script else "POINTS")
         backend = self.local if (self._claude_down() and self.local) else self.backend
@@ -717,7 +731,7 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         menu.addSeparator()
         self.mode_group = QActionGroup(menu)
         for m in self.cfg.modes:
-            a = QAction(f"{m.title()} mode", menu, checkable=True)
+            a = QAction(f"{mode_label(m)} mode", menu, checkable=True)
             a.triggered.connect(lambda _=False, m=m: self._set_mode(m))
             self.mode_group.addAction(a)
             menu.addAction(a)
@@ -739,6 +753,8 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         menu.addSeparator()
         menu.addAction("Refresh work log now", self.refresh_worklog)
         menu.addAction("Build interview prep", self.build_interview_prep)
+        if "sbir" in self.cfg.modes:
+            menu.addAction("Prep SBIR call…", self.build_sbir_prep)
         menu.addAction("Open meeting notes folder", lambda: os.startfile(ROOT / "meetings")
                        if (ROOT / "meetings").exists() else self.overlay.show_status("No meeting notes yet", 2000))
         menu.addAction("Open profiles folder", lambda: os.startfile(resolve("profiles")))
@@ -804,6 +820,23 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
                 self.bridge.reload_context.emit()
         threading.Thread(target=run, daemon=True).start()
 
+    def build_sbir_prep(self):
+        who, ok = QInputDialog.getText(None, "Cue — prep SBIR call", "Who's the call with? (person or organization)")
+        who = who.strip()
+        if not ok or not who:
+            return
+
+        def run():
+            self.bridge.status.emit(f"Building call prep for {who} (~1 min)…", 150_000)
+            r = subprocess.run(self_cmd("prep-sbir", who), cwd=self_cwd(), capture_output=True,
+                               text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            log.info("sbir prep rc=%s\n%s", r.returncode, (r.stdout + r.stderr)[-1000:])
+            self.bridge.status.emit("Call prep ready (profiles/sbir/prep.md)" if r.returncode == 0
+                                    else "Call prep failed — see the app log", 5000)
+            if r.returncode == 0 and self.mode == "sbir":
+                self.bridge.reload_context.emit()
+        threading.Thread(target=run, daemon=True).start()
+
     # ------------------------------------------------------------------ shutdown
     def shutdown(self):
         """Save everything. Safe to call from any thread and more than once (red dot, tray,
@@ -840,6 +873,10 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         # not quit(): in Qt 6 that first asks each window to close, and the panel refuses
         # (its close routes back here), which cancels the quit
         QApplication.exit(0)
+
+
+def mode_label(mode: str) -> str:
+    return "SBIR" if mode == "sbir" else mode.title()
 
 
 def _short(device: str) -> str:

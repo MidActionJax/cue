@@ -34,6 +34,7 @@ It's for anyone who knows their stuff but freezes when it's their turn to talk.
 | 📝 **Takes the notes** | Key points, decisions, action items (yours first) and what you were asked, updated live. When the call ends you get polished notes and **a ready-to-send follow-up email**. Next time, your home screen shows what you promised. |
 | 👥 **Knows who said what** | Voice fingerprints split the call into speakers. Name someone once and they're recognized on every future call. It also tells your voice apart from other people in the room. |
 | 📈 **Learns how you talk** | After each call it compares what it suggested with what you actually said, and learns your phrasing, what you use and skip, and facts you stated. Suggestions sound more like you every week. |
+| 🤝 **SBIR mode** | For consulting calls with SBIR program managers and founders: answers from your offer, proof and FAQ, a per-contact prep sheet built from your tracker spreadsheets, and a rules file it never breaks (no invented prices, clients or endorsements). |
 | 🎯 **Practice mode** | It asks likely questions out loud, you answer out loud, and it coaches you with what worked, what to add, and a tighter version in your own words. |
 
 <table>
@@ -141,7 +142,7 @@ Build your work memory once (after that it updates itself at 7:30 every morning)
 ```
 
 `cue-cli.exe` is the command-line side of the app: `worklog`, `note "…"`, `prep`,
-`accent-test`, `devices`. `Cue.exe --quit` ends a running Cue's call (notes saved) and closes it.
+`prep-sbir "<name>"`, `sbir-sync`, `accent-test`, `devices`. `Cue.exe --quit` ends a running Cue's call (notes saved) and closes it.
 
 **Before your first call:** open **Cue** from the desktop and pick **Work**. When people talk,
 the **Them** light should turn green (click it to pick your call's audio device). Then click
@@ -153,7 +154,7 @@ the **Them** light should turn green (click it to pick your call's audio device)
 
 <img src="assets/screenshots/1-start.png" alt="Start screen" width="620" align="right">
 
-1. Open Cue → **Work**, **Interview** or **Practice**.
+1. Open Cue → **Work**, **Interview**, **SBIR** or **Practice**.
 2. Asked something? **`Tab`**.
 3. Didn't understand them? **`Shift+Tab`** (What?).
 4. Call's over → the **red dot**. Notes save automatically (they save even if the window is just closed).
@@ -180,6 +181,14 @@ to `stt.accurate_speakers` to route only their speech through the slower, more a
 **Interviews.** Drop your resume and the job description (`job.md`) into `profiles/interview/`
 and run `cue-cli prep` (`prep.cmd` from source). You get a 30-second intro, likely questions with talking points in your
 voice, STAR stories from your real history, and questions to ask them. Practice mode quizzes you on them.
+
+**SBIR mode.** For consultants on SBIR/STTR calls with referral partners (state programs, SBDCs,
+I-Corps hubs, firms) and founders. Fill in `profiles/sbir/` (intro, offer, proof, FAQ, and a
+`rules.md` of hard limits, read last so nothing overrides it), point `sbir.tracker_dir` at your
+pipeline spreadsheets, and before a call run `cue-cli prep-sbir "Pat Lee"` (or tray → *Prep SBIR
+call…*) for a one-page prep on that person. After the call you get a follow-up email in your
+style, a line to paste into your tracker, and anything you promised is filed under that contact
+for next time.
 
 **Quick notes.** Work that never touched Claude: `cue-cli note "restarted the nightly cron"`, or
 tray → *Add a quick note…*. It goes into tomorrow's brief.
@@ -228,7 +237,7 @@ Everything lives in `config.yaml`, and every option is commented. The usual knob
 | Answers feel generic | run `cue-cli worklog`, then fill in `profiles/me.md` and `workstreams.md` |
 | Something went wrong on a call | tray → *Open app log* (`data/logs/app-<date>.log` in your data folder) |
 | Panel is off-screen | delete `data/ui_state.json` in your data folder |
-| Try it without a call | `Cue.exe --demo --mode work` (or `run.cmd --demo --mode work` from source) |
+| Try it without a call | `Cue.exe --demo --mode work` or `--mode sbir` (or `run.cmd --demo …` from source) |
 
 </details>
 

@@ -36,14 +36,15 @@ def _is_placeholder(text: str) -> bool:
     return "<!-- template -->" in text
 
 
-def load_context(entries: list[str]) -> tuple[str, list[str]]:
+def load_context(entries: list[str], exclude: list[str] = ()) -> tuple[str, list[str]]:
     """Returns (combined text, list of files actually used)."""
     blocks, used = [], []
+    skip = {resolve(e).resolve() for e in exclude}
     for entry in entries:
         p = resolve(entry)
         files = sorted(f for f in p.rglob("*") if f.suffix.lower() in DOC_EXT) if p.is_dir() else [p]
         for f in files:
-            if not f.exists() or f.name.lower() == "readme.md":
+            if not f.exists() or f.name.lower() == "readme.md" or f.resolve() in skip:
                 continue
             text = _read(f).strip()
             if not text or _is_placeholder(text):
@@ -53,12 +54,40 @@ def load_context(entries: list[str]) -> tuple[str, list[str]]:
     return "\n\n".join(blocks), used
 
 
-def load_vocabulary(extra: list[str]) -> list[str]:
-    words = list(extra or [])
-    glossary = resolve("profiles/work/glossary.txt")
-    if glossary.exists():
-        for w in re.split(r"[,\n]", glossary.read_text(encoding="utf-8")):
-            w = w.strip()
+GLOSSARIES = ("profiles/work/glossary.txt",   # written by the worklog job
+              "profiles/sbir/glossary.txt")   # names from your SBIR trackers (cue-cli sbir-sync)
+
+
+def _prep_names(path: str) -> list[str]:
+    """Proper names from a prep sheet's title and 'Who they are' section: the people on the next call."""
+    p = resolve(path)
+    if not p.exists():
+        return []
+    text = p.read_text(encoding="utf-8")
+    m = re.search(r"\A(.*?)^## [^\n]*who they are[^\n]*$(.*?)(?=^## |\Z)", text, re.M | re.S | re.I)
+    head = (m.group(1) + m.group(2)) if m else text[:600]
+    names = re.findall(r"\b(?:[A-Z][a-zA-Z'-]+|[A-Z]{2,})(?:[ \t]+(?:[A-Z][a-zA-Z'-]+|[A-Z]{2,}))*", head)
+    skip = {"Prep", "Who", "Contact", "This", "The", "Phase", "Nothing", "Warm", "I"}
+    return [n for n in dict.fromkeys(names) if n not in skip and len(n) > 2 and "'" not in n]
+
+
+def load_vocabulary(extra: list[str], mode: str | None = None) -> list[str]:
+    """Words to prime Whisper with. Only the first ~60 fit, so in SBIR mode the people on the
+    prepped call and your tracker's names go before everything else."""
+    mode_first = mode == "sbir"
+    words = _prep_names("profiles/sbir/prep.md")[:15] if mode_first else []
+    order = sorted(GLOSSARIES, key=lambda g: f"/{mode}/" not in g) if mode else GLOSSARIES
+    sources = []
+    for g in order:
+        glossary = resolve(g)
+        if glossary.exists():
+            sources.append([w.strip() for w in re.split(r"[,\n]", glossary.read_text(encoding="utf-8"))])
+    if mode_first and sources:
+        sources.insert(1, list(extra or []))
+    else:
+        sources.insert(0, list(extra or []))
+    for src in sources:
+        for w in src:
             if w and w not in words:
                 words.append(w)
     return words

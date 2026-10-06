@@ -64,7 +64,23 @@ USER_FILES = [
     ("profiles/work/notes.example.md", "profiles/work/notes.md"),
     ("profiles/work/workstreams.example.md", "profiles/work/workstreams.md"),
     ("profiles/interview/README.md", "profiles/interview/README.md"),
+    ("profiles/sbir/README.md", "profiles/sbir/README.md"),
+    ("profiles/sbir/offer.example.md", "profiles/sbir/offer.md"),
+    ("profiles/sbir/proof.example.md", "profiles/sbir/proof.md"),
+    ("profiles/sbir/rules.example.md", "profiles/sbir/rules.md"),
+    ("profiles/sbir/faq.example.md", "profiles/sbir/faq.md"),
 ]
+
+
+def _fill_missing(mine: dict, defaults: dict) -> dict:
+    """Settings added in newer versions (e.g. a new mode) come from the shipped example, so an
+    older config.yaml keeps working. Your values always win; lists aren't merged."""
+    for k, v in defaults.items():
+        if k not in mine:
+            mine[k] = v
+        elif isinstance(v, dict) and isinstance(mine[k], dict):
+            _fill_missing(mine[k], v)
+    return mine
 
 
 def ensure_user_files() -> None:
@@ -81,7 +97,12 @@ def load(path: Path | None = None) -> Cfg:
         ensure_user_files()
     path = path or ROOT / "config.yaml"
     with open(path, encoding="utf-8") as f:
-        return Cfg(yaml.safe_load(f))
+        mine = yaml.safe_load(f) or {}
+    example = APP_DIR / "config.example.yaml"
+    if example.exists() and Path(path).resolve() != example.resolve():
+        with open(example, encoding="utf-8") as f:
+            _fill_missing(mine, yaml.safe_load(f) or {})
+    return Cfg(mine)
 
 
 def resolve(p: str | Path) -> Path:

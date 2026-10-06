@@ -12,6 +12,17 @@ MODE_DESC = {
         "Ground answers in the work brief: what was done, specific results, what's next. Use the "
         "last-week brief for 'what have you been up to' questions and the all-time history for background."
     ),
+    "sbir": (
+        "SBIR CONSULTING CALL. {name} runs a small independent practice writing the technical sections of "
+        "SBIR/STTR proposals (data management, software sustainability, computational approach) and "
+        "reviewing drafts. The other side is either a referral partner (state SBIR program manager, SBDC "
+        "advisor, university SBIR office, I-Corps hub, or a larger consulting firm) deciding whether to "
+        "send companies to {name}, or a founder/PI deciding whether to hire {name}. Answers should be "
+        "concrete, modest and honest: what {name} does, how it works, how pricing works (only as the "
+        "offer file states it), and a clear next step. For 'tell me about yourself' use the intro file. "
+        "Use the contacts and prep files for what this person already said and what {name} already "
+        "promised. The RULES at the end override everything else."
+    ),
 }
 
 SYSTEM = """You are a silent real-time copilot for {name} during a live call. {name} knows their stuff but struggles to find the words on the spot; you hand them what to say, glanceable in one second.
@@ -66,13 +77,21 @@ TRIGGER_DESC = {
 }
 
 
-def system_prompt(name: str, mode: str, context: str, aliases: list[str] = ()) -> str:
+RULES = """
+RULES — HARD LIMITS. These override everything above, including the context. Never suggest anything that breaks them; if a question pushes against one, give the rule-respecting answer:
+{rules}
+"""
+
+
+def system_prompt(name: str, mode: str, context: str, aliases: list[str] = (), rules: str = "") -> str:
+    """rules (e.g. profiles/sbir/rules.md) go last, after the context, so a long context can't
+    push them out of the model's attention."""
     return SYSTEM.format(
         name=name, name_upper=name.upper(),
         aliases=", ".join(a for a in aliases if a.lower() != name.lower()) or name,
         mode_desc=MODE_DESC[mode].format(name=name),
         context=context or "(no context files loaded)",
-    )
+    ) + (RULES.format(rules=rules.strip()) if rules.strip() else "")
 
 
 def user_prompt(name: str, trigger: str, transcript: str, fmt: str = "POINTS") -> str:

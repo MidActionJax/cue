@@ -14,10 +14,18 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from . import config  # noqa: E402
 
-DEMO = [
-    ("them", "Okay, thanks everyone. Let's go around quickly."),
-    ("them", "{name}, where are we with the data pipeline? Is the dashboard running on its own now?"),
-]
+DEMO = {
+    "work": [
+        ("them", "Okay, thanks everyone. Let's go around quickly."),
+        ("them", "{name}, where are we with the data pipeline? Is the dashboard running on its own now?"),
+    ],
+    "sbir": [
+        ("them", "Thanks for making the time. I've read a little about what you do."),
+        ("them", "So {name}, what do you charge for something like this?"),
+        ("them", "And how do you handle our proprietary data if you use AI tools?"),
+        ("them", "Also, could we put you on our website as a partner?"),
+    ],
+}
 
 
 _handler_ref = None
@@ -63,7 +71,7 @@ def main():
     ap = argparse.ArgumentParser(prog="cue")
     ap.add_argument("--devices", action="store_true", help="list audio devices and exit")
     ap.add_argument("--demo", action="store_true", help="no audio: inject a fake question to test overlay + LLM")
-    ap.add_argument("--mode", choices=["work", "interview"], help="skip the Work/Interview chooser")
+    ap.add_argument("--mode", choices=["work", "interview", "sbir"], help="skip the start-screen chooser")
     ap.add_argument("--quit", action="store_true", help="end the running Cue's call (notes saved) and exit")
     args = ap.parse_args()
 
@@ -110,10 +118,14 @@ def main():
         from .audio import Utterance
         import numpy as np
 
-        def inject():
-            for i, (src, text) in enumerate(DEMO):
-                t = time.time() - 10 + i * 4
-                ctl.bridge.text.emit(Utterance(src, i, np.zeros(1), t, t + 3, True), text.format(name=cfg.user.name))
+        lines = DEMO.get(args.mode or "", DEMO["work"])
+
+        def inject(i=0):  # one line at a time, like a real call (each question gets its own answer)
+            src, text = lines[i]
+            t = time.time() - 3
+            ctl.bridge.text.emit(Utterance(src, i, np.zeros(1), t, t + 3, True), text.format(name=cfg.user.name))
+            if i + 1 < len(lines):
+                QTimer.singleShot(12000 if "?" in text else 1500, lambda: inject(i + 1))
         QTimer.singleShot(6000, inject)
 
     code = app.exec()

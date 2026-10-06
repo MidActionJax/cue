@@ -20,6 +20,9 @@ profiles/work/*.txt
 !profiles/work/*.example.md
 profiles/interview/*
 !profiles/interview/README.md
+profiles/sbir/*
+!profiles/sbir/*.example.md
+!profiles/sbir/README.md
 # where your data lives (see cue/config.py)
 cue_home.txt
 # bundled at build time; setup.ps1 downloads it

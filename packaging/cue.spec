@@ -31,13 +31,15 @@ datas = [
     (os.path.join(REPO, "profiles", "me.example.md"), "profiles"),
     (os.path.join(REPO, "profiles", "work", "*.example.md"), os.path.join("profiles", "work")),
     (os.path.join(REPO, "profiles", "interview", "README.md"), os.path.join("profiles", "interview")),
+    (os.path.join(REPO, "profiles", "sbir", "*.example.md"), os.path.join("profiles", "sbir")),
+    (os.path.join(REPO, "profiles", "sbir", "README.md"), os.path.join("profiles", "sbir")),
     (os.path.join(REPO, "models", "wespeaker_en_voxceleb_resnet34_LM.onnx"), "models"),
 ]
 datas += collect_data_files("faster_whisper")
 
 hiddenimports = (collect_submodules("cue") + collect_submodules("worklog")
                  + ["pycaw.pycaw", "comtypes.client", "webrtcvad", "keyboard", "soxr", "pyaudiowpatch",
-                    "anthropic", "httpx", "pypdf", "yaml", "PyQt6.QtNetwork"])
+                    "anthropic", "httpx", "pypdf", "yaml", "PyQt6.QtNetwork", "openpyxl"])
 
 a = Analysis(
     [os.path.join(SPECPATH, "cue_entry.py")],

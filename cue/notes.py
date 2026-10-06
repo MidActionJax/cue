@@ -119,14 +119,34 @@ CURRENT LEARNED:
 TRANSCRIPT:
 {transcript}"""
 
-KIND = {"work": "team/work call", "interview": "job interview", "practice": "practice session"}
+KIND = {"work": "team/work call", "interview": "job interview", "practice": "practice session",
+        "sbir": "SBIR consulting call (referral partner or prospective client)"}
+
+SBIR_EXTRA = """
+
+This was an SBIR consulting call. Instead of the "Follow-up email draft" section above, end with these three sections (always include them):
+## Contact
+(one line: the organization and state this call was with, written exactly like its heading in CONTACTS if it's there, e.g. "State SBIR Office (Ohio)"; otherwise "<Org> (<State>)")
+## Follow-up email
+(To: <name>. A short email {name} can send today: thank them, confirm anything {name} promised with a date, one clear next step. Follow the STYLE rules in RULES exactly: no em dashes, two to four short paragraphs, plain and direct, sign-off exactly "Thanks,\\nJaxon".)
+## Tracker line
+(one line {name} can paste into the spreadsheet, e.g. "2026-10-06 call: added to internal list; wants pricing sheet; FU 10/20")
+## Promises
+(bullets: only things {name} said on the call that {name} would send or do, each with a due date if one was said. Omit the section if none.)
+
+RULES:
+{rules}
+
+CONTACTS (what was known before the call):
+{contacts}"""
 VOICE = ROOT / "profiles" / "voice.md"
 LEARNED = ROOT / "profiles" / "learned.md"
 
 
 def _glossary() -> str:
-    p = resolve("profiles/work/glossary.txt")
-    return p.read_text(encoding="utf-8").strip()[:1500] if p.exists() else "(none)"
+    from .context import GLOSSARIES
+    parts = [resolve(g).read_text(encoding="utf-8").strip() for g in GLOSSARIES if resolve(g).exists()]
+    return "\n".join(parts)[:3000] or "(none)"
 
 
 class NoteTaker:
@@ -280,21 +300,44 @@ def finalize(stamp: str) -> None:
     last = (CALLS / f"{stamp}.txt").stat().st_mtime
     minutes = max(1, int((last - start.timestamp()) // 60))
     if mode != "practice":
-        title = "Interview" if mode == "interview" else "Team call"
+        title = {"interview": "Interview", "sbir": "SBIR call"}.get(mode, "Team call")
         # the on-screen suggestions were private: the notes must only reflect what was said aloud
         spoken = "\n".join(l for l in transcript.splitlines() if "ASSIST (shown)" not in l)
         aliases = ", ".join(a for a in cfg.user.aliases if a.lower() != name.lower())
-        text = claude_p(FINAL.format(kind=KIND[mode], name=name, NAME=name.upper(), aliases=aliases,
-                                     when=f"{start:%Y-%m-%d %H:%M}", minutes=minutes, glossary=_glossary(),
-                                     notes=notes, transcript=spoken[-120_000:], title=title,
-                                     voice=VOICE.read_text(encoding="utf-8")[:3000] if VOICE.exists() else "(not learned yet)"),
-                        "Output only the notes.", cfg.notes.final_model, timeout=600)
+        prompt = FINAL.format(kind=KIND[mode], name=name, NAME=name.upper(), aliases=aliases,
+                              when=f"{start:%Y-%m-%d %H:%M}", minutes=minutes, glossary=_glossary(),
+                              notes=notes, transcript=spoken[-120_000:], title=title,
+                              voice=VOICE.read_text(encoding="utf-8")[:3000] if VOICE.exists() else "(not learned yet)")
+        if mode == "sbir":
+            from . import sbir
+            read = lambda p: p.read_text(encoding="utf-8") if p.exists() else "(none)"
+            prompt += SBIR_EXTRA.format(name=name, rules=read(sbir.RULES),
+                                        contacts=(read(sbir.CONTACTS) + "\n" + read(sbir.MANUAL))[:30_000])
+        text = claude_p(prompt, "Output only the notes.", cfg.notes.final_model, timeout=600)
         MEETINGS.mkdir(parents=True, exist_ok=True)
         notes_path.write_text(text.strip() + "\n", encoding="utf-8")
+        if mode == "sbir":
+            _save_promises(text, start)
     if cfg.notes.learn:
         learn(cfg, transcript, mode, start)
     _mark_done(stamp)
     log.info("finalized %s", stamp)
+
+
+def _save_promises(text: str, start: datetime) -> None:
+    """SBIR calls: what you promised goes into contacts_manual.md, so the next prep sees it."""
+    from . import sbir
+    if "## Contact" not in text:
+        return
+    contact = next(iter(sbir.section(text, "contact")), "") or \
+        next((l.strip() for l in text.split("## Contact", 1)[1].splitlines()[1:3]
+              if l.strip() and not l.startswith("#")), "")
+    tracker = next((l.strip() for l in text.split("## Tracker line", 1)[-1].splitlines()[1:4]
+                    if l.strip() and not l.startswith("#")), "") if "## Tracker line" in text else ""
+    promises = sbir.section(text, "promises")
+    if contact and (promises or tracker):
+        sbir.append_promises(contact.strip("*` \"'"), ([f"tracker: {tracker.strip('`')}"] if tracker else [])
+                             + [f"promised: {p}" for p in promises], start.date())
 
 
 def pending_calls(min_age_s: int = 20 * 60) -> list[str]:
