@@ -42,7 +42,9 @@ def load_context(entries: list[str], exclude: list[str] = ()) -> tuple[str, list
     skip = {resolve(e).resolve() for e in exclude}
     for entry in entries:
         p = resolve(entry)
-        files = sorted(f for f in p.rglob("*") if f.suffix.lower() in DOC_EXT) if p.is_dir() else [p]
+        # a folder's glossary.txt is for Whisper, not the answer model
+        files = sorted(f for f in p.rglob("*") if f.suffix.lower() in DOC_EXT and f.name != "glossary.txt") \
+            if p.is_dir() else [p]
         for f in files:
             if not f.exists() or f.name.lower() == "readme.md" or f.resolve() in skip:
                 continue

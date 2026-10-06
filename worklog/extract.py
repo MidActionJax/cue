@@ -233,9 +233,22 @@ def meeting_notes(since: date, until: date) -> dict[date, list[str]]:
             d = date.fromisoformat(p.stem[:10])
         except ValueError:
             continue
-        if since <= d <= until:
+        if since <= d <= until and not _is_sbir_call(p):
             out[d].append(_clip(p.read_text(encoding="utf-8", errors="replace"), 6000))
     return out
+
+
+def _is_sbir_call(p: Path) -> bool:
+    """SBIR consulting calls stay out of the work brief: that's a separate practice, not the job.
+    (They live in meetings/ and contacts_manual.md.)"""
+    sidecar = _HOME / "data" / "calls" / f"{p.stem}.json"
+    try:
+        if json.loads(sidecar.read_text(encoding="utf-8")).get("mode") == "sbir":
+            return True
+    except (OSError, ValueError):
+        pass
+    first = p.read_text(encoding="utf-8", errors="replace").lstrip()[:80].lower()
+    return first.startswith(("# sbir call", "# sbir consulting call"))
 
 
 def build_digests(sessions: dict[str, Session], commits: dict[date, list[str]],

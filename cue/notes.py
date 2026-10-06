@@ -335,6 +335,9 @@ def _save_promises(text: str, start: datetime) -> None:
     tracker = next((l.strip() for l in text.split("## Tracker line", 1)[-1].splitlines()[1:4]
                     if l.strip() and not l.startswith("#")), "") if "## Tracker line" in text else ""
     promises = sbir.section(text, "promises")
+    if re.search(r"unknown|not stated|unidentified|unclear", contact, re.I):
+        log.info("SBIR call: couldn't tell who it was with; promises left in the notes only")
+        return
     if contact and (promises or tracker):
         sbir.append_promises(contact.strip("*` \"'"), ([f"tracker: {tracker.strip('`')}"] if tracker else [])
                              + [f"promised: {p}" for p in promises], start.date())
