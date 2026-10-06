@@ -46,6 +46,26 @@ def _splash():
     return s
 
 
+_crash_file = None
+
+
+def _log_crashes(logs) -> None:
+    """The compiled app has no console, so an uncaught error would vanish. Send Python errors
+    (main thread and worker threads) to the app log, and native crashes to logs/crash.log."""
+    global _crash_file
+    import faulthandler
+    import threading
+    log = logging.getLogger("crash")
+    sys.excepthook = lambda t, e, tb: log.critical("uncaught error", exc_info=(t, e, tb))
+    threading.excepthook = lambda a: log.critical("uncaught error in thread %s", a.thread and a.thread.name,
+                                                  exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
+    try:
+        _crash_file = open(logs / "crash.log", "a", encoding="utf-8")
+        faulthandler.enable(_crash_file)
+    except OSError:
+        pass
+
+
 def _on_console_close(save) -> None:
     """Closing the console window (its X) kills the process ~5 s later without any Qt event.
     Catch it so the call's notes and learning still get saved."""
@@ -82,6 +102,7 @@ def main():
                             logging.FileHandler(logs / f"app-{time.strftime('%Y-%m-%d')}.log", encoding="utf-8"),
                             # the compiled app has no console
                             *([logging.StreamHandler()] if sys.stderr else [])])
+    _log_crashes(logs)
     if args.devices:
         from .audio import list_devices
         list_devices()

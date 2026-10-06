@@ -35,6 +35,9 @@ WHAT WE KNOW ABOUT THIS CONTACT (from the tracker and notes; may be partial):
 EMAIL THREAD (if pasted):
 {thread}
 
+NOTES FROM EARLIER CALLS WITH THEM (newest first; what was said, decided and promised):
+{past_calls}
+
 {name}'S FILES (intro, offer, proof, FAQ, voice):
 {files}
 
@@ -73,23 +76,42 @@ def find_contact(who: str) -> tuple[str, str]:
         if f.exists():
             for m in re.finditer(r"^### (.+?)$(.*?)(?=^#{1,3} |\Z)", f.read_text(encoding="utf-8"), re.M | re.S):
                 blocks.append((m.group(1).strip(), m.group(0).strip()))
-    q = who.lower()
+    q = who.lower().strip()
+    words = [w for w in re.findall(r"[\w-]+", q) if len(w) > 1]
 
     def score(b):
         text = b[1].lower()
-        if q in text:
+        if re.search(rf"(?<![\w-]){re.escape(q)}(?![\w-])", text):
             return 2.0
-        words = [w for w in re.findall(r"\w+", q) if len(w) > 2]
-        hit = sum(w in text for w in words) / max(1, len(words))
-        return hit + SequenceMatcher(None, q, b[0].lower()).ratio() * 0.5
+        # whole words only: "Ann" must not match inside "Joanne"
+        hit = sum(bool(re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", text)) for w in words) / max(1, len(words))
+        return hit + SequenceMatcher(None, q, b[0].lower()).ratio() * 0.3
 
     ranked = sorted(blocks, key=score, reverse=True)
-    if not ranked or score(ranked[0]) < 0.5:
+    if not ranked or score(ranked[0]) < 1.0:   # every word of the name has to be there
         return who, ""
     best = ranked[0]
     # the same org can appear in both files (tracker + your notes): include every block for it
     same = [b[1] for b in blocks if b[0].lower() == best[0].lower()]
     return best[0], "\n\n".join(same)
+
+
+def past_calls(heading: str, who: str, limit: int = 3) -> str:
+    """Final notes of earlier SBIR calls with this contact (matched on the notes' ## Contact line)."""
+    meetings = config.ROOT / "meetings"
+    keys = [k.lower() for k in (heading, who) if k]
+    found = []
+    for p in sorted(meetings.glob("*.md"), reverse=True) if meetings.exists() else []:
+        text = p.read_text(encoding="utf-8", errors="replace")
+        if not text.lstrip().lower().startswith("# sbir call") or "## Contact" not in text:
+            continue
+        contact = text.split("## Contact", 1)[1].split("\n## ", 1)[0].lower()
+        names = text.split("## Updates by person", 1)[-1].split("\n## ", 1)[0].lower()
+        if any(k in contact or (len(k.split()) > 1 and k in names) for k in keys):
+            found.append(f"--- call {p.stem} ---\n{text[:8000]}")
+            if len(found) >= limit:
+                break
+    return "\n\n".join(found)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -100,7 +122,21 @@ def main(argv: list[str] | None = None) -> int:
         print('usage: cue-cli prep-sbir "<person or organization>"')
         return 2
     cfg = config.load()
+    folder = (cfg.get("sbir") or {}).get("tracker_dir")
+    if folder:  # pick up spreadsheet edits made since the morning sync (fast, no Claude)
+        try:
+            from worklog.sbir_sync import sync
+            sync(folder)
+        except Exception as e:
+            log.warning("tracker sync skipped: %s", e)
     heading, contact = find_contact(who)
+    history = past_calls(heading, who)
+    if not contact and history:
+        # the person isn't in the tracker yet, but an earlier call names them: use that call's contact
+        line = history.split("## Contact", 1)[1].split("\n## ", 1)[0].strip().splitlines()
+        if line:
+            h2, c2 = find_contact(line[0].strip("-* "))
+            heading, contact = (h2, c2) if c2 else (line[0].strip("-* "), "")
     if contact:
         log.info("matched contact: %s", heading)
     else:
@@ -114,9 +150,11 @@ def main(argv: list[str] | None = None) -> int:
     files, used = load_context([str(p) for p in (SBIR / "intro.md", SBIR / "offer.md", SBIR / "proof.md",
                                                  SBIR / "faq.md", config.ROOT / "profiles" / "voice.md")])
     rules, _ = load_context([str(SBIR / "rules.md")])
-    log.info("prep from %s", used)
+    history = past_calls(heading, who)
+    log.info("prep for %s from %s + %d earlier call(s)", heading, used, history.count("--- call "))
     text = claude_p(PROMPT.format(name=cfg.user.name, who=heading if contact else who, today=date.today(),
                                   contact=contact or "(not in the contacts files)", thread=thread or "(none)",
+                                  past_calls=history or "(no earlier calls recorded)",
                                   files=files, rules=rules or "(none)"),
                     f"You are {cfg.user.name}'s call coach. Output only the markdown.", cfg.worklog.model,
                     timeout=600)
