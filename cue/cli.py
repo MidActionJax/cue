@@ -79,7 +79,7 @@ def main() -> int:
 
 
 def _docs(args: list[str]) -> int:
-    """cue-cli docs list | add FILE... [--scope all|work|interview|sbir] | remove NAME"""
+    """cue-cli docs list | add FILE... [--scope all|work|interview|sbir] | remove NAME [--scope ...]"""
     from pathlib import Path
 
     from . import docs
@@ -111,11 +111,17 @@ def _docs(args: list[str]) -> int:
                 print(f"  NOT ADDED: {e}")
         return 1 if bad else 0
     if args[0] == "remove" and len(args) > 1:
-        name = " ".join(args[1:]).lower()
-        hits = [d for d in docs.list_docs() if d.name.lower() == name] or \
-               [d for d in docs.list_docs() if name in d.name.lower()]
+        rest, scope = args[1:], None
+        if "--scope" in rest:
+            i = rest.index("--scope")
+            scope, rest = (rest[i + 1] if i + 1 < len(rest) else ""), rest[:i] + rest[i + 2:]
+        name = " ".join(rest).lower()
+        pool = [d for d in docs.list_docs() if scope is None or d.scope == scope]
+        hits = [d for d in pool if d.name.lower() == name] or [d for d in pool if name in d.name.lower()]
         if len(hits) != 1:
-            print(f"{'No' if not hits else 'More than one'} document matches {name!r}")
+            print(f"No document matches {name!r}" if not hits else
+                  "More than one document matches; add --scope:\n" +
+                  "\n".join(f"  {d.name}  --scope {d.scope}" for d in hits))
             return 1
         docs.remove(hits[0])
         print(f"  removed {hits[0].label}")
