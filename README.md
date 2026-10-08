@@ -34,6 +34,7 @@ It's for anyone who knows their stuff but freezes when it's their turn to talk.
 | 📝 **Takes the notes** | Key points, decisions, action items (yours first) and what you were asked, updated live. When the call ends you get polished notes and **a ready-to-send follow-up email**. Next time, your home screen shows what you promised. |
 | 👥 **Knows who said what** | Voice fingerprints split the call into speakers. Name someone once and they're recognized on every future call. It also tells your voice apart from other people in the room. |
 | 📈 **Learns how you talk** | After each call it compares what it suggested with what you actually said, and learns your phrasing, what you use and skip, and facts you stated. Suggestions sound more like you every week. |
+| 📄 **Answers from your documents** | Add PDFs, Word files or text (tray → *Add documents…*, or drag them onto the panel): a solicitation, a paper, a project plan. When you're asked about something in them, the talking points use the document's real figures and wording. Big documents are searched, so only the passages that match the question go along. |
 | 🤝 **SBIR mode** | For consulting calls with SBIR program managers and founders: answers from your offer, proof and FAQ, a per-contact prep sheet built from your tracker spreadsheets, and a rules file it never breaks (no invented prices, clients or endorsements). |
 | 🎯 **Practice mode** | It asks likely questions out loud, you answer out loud, and it coaches you with what worked, what to add, and a tighter version in your own words. |
 
@@ -142,7 +143,7 @@ Build your work memory once (after that it updates itself at 7:30 every morning)
 ```
 
 `cue-cli.exe` is the command-line side of the app: `worklog`, `note "…"`, `prep`,
-`prep-sbir "<name>"`, `sbir-sync`, `accent-test`, `devices`. `Cue.exe --quit` ends a running Cue's call (notes saved) and closes it.
+`prep-sbir "<name>"`, `sbir-sync`, `docs`, `accent-test`, `devices`. `Cue.exe --quit` ends a running Cue's call (notes saved) and closes it.
 
 **Before your first call:** open **Cue** from the desktop and pick **Work**. When people talk,
 the **Them** light should turn green (click it to pick your call's audio device). Then click
@@ -181,6 +182,13 @@ to `stt.accurate_speakers` to route only their speech through the slower, more a
 **Interviews.** Drop your resume and the job description (`job.md`) into `profiles/interview/`
 and run `cue-cli prep` (`prep.cmd` from source). You get a 30-second intro, likely questions with talking points in your
 voice, STAR stories from your real history, and questions to ask them. Practice mode quizzes you on them.
+
+**Documents.** Tray → **Add documents…** or drag files onto the panel, then pick which calls
+they're for (all, or only Work / Interview / SBIR). PDFs, Word (.docx), text and markdown work;
+scanned or password-protected PDFs and old `.doc` files get a clear message saying how to convert
+them. Remove them from the tray's **Documents** menu, or `cue-cli docs list / add / remove`.
+Documents are sent to Claude with your questions, so only add what you're allowed to share
+with an AI tool.
 
 **SBIR mode.** For consultants on SBIR/STTR calls with referral partners (state programs, SBDCs,
 I-Corps hubs, firms) and founders. Fill in `profiles/sbir/` (intro, offer, proof, FAQ, and a

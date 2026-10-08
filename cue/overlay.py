@@ -280,6 +280,7 @@ class Overlay(QWidget):
     trigger_clicked = pyqtSignal()
     ask_clicked = pyqtSignal()
     close_clicked = pyqtSignal()
+    files_dropped = pyqtSignal(list)    # documents dragged onto the panel (local paths)
 
     def __init__(self, cfg):
         flags = (Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
@@ -291,6 +292,7 @@ class Overlay(QWidget):
         self.cfg = cfg
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAcceptDrops(True)         # drag PDFs / Word / text files onto the panel to add them
         self.tint = QColor(cfg.tint)
         self.acrylic = False
         self.fs = fs = cfg.font_size
@@ -475,6 +477,29 @@ class Overlay(QWidget):
         # taskbar "Close window", Alt+F4, Windows asking the app to close: end the call properly
         e.ignore()
         self.close_clicked.emit()
+
+    @staticmethod
+    def _dropped_files(e) -> list[str]:
+        md = e.mimeData()
+        return [u.toLocalFile() for u in md.urls() if u.isLocalFile()] if md and md.hasUrls() else []
+
+    def dragEnterEvent(self, e):
+        if self._dropped_files(e):
+            e.acceptProposedAction()
+            self.show_status("Drop to add as a document", 2000)
+        else:
+            e.ignore()
+
+    def dragMoveEvent(self, e):
+        if self._dropped_files(e):
+            e.acceptProposedAction()
+
+    def dropEvent(self, e):
+        files = self._dropped_files(e)
+        if files:
+            e.acceptProposedAction()
+            # after the drop finishes: the scope question is a dialog, which mustn't run inside OLE drag-drop
+            QTimer.singleShot(0, lambda: self.files_dropped.emit(files))
 
     def paintEvent(self, e):
         p = QPainter(self)

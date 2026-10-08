@@ -82,23 +82,60 @@ RULES — HARD LIMITS. These override everything above, including the context. N
 {rules}
 """
 
-
-def system_prompt(name: str, mode: str, context: str, aliases: list[str] = (), rules: str = "") -> str:
-    """rules (e.g. profiles/sbir/rules.md) go last, after the context, so a long context can't
-    push them out of the model's attention."""
-    return SYSTEM.format(
-        name=name, name_upper=name.upper(),
-        aliases=", ".join(a for a in aliases if a.lower() != name.lower()) or name,
-        mode_desc=MODE_DESC[mode].format(name=name),
-        context=context or "(no context files loaded)",
-    ) + (RULES.format(rules=rules.strip()) if rules.strip() else "")
+DOCS = """
+{NAME}'S DOCUMENTS (files {name} added so you can answer questions about them). When a question touches something in them, answer from the document: use its exact figures, names, dates and wording, and it's fine to say which document it comes from ("per the solicitation…"). If the document doesn't cover what was asked, say what it does cover rather than guessing.{searched}
+{docs}
+"""
+SEARCHED = ("\nLarger documents ({names}) are searched instead: passages that match the question are attached "
+            "to each request as DOCUMENT EXCERPTS. Treat them like the rest of the documents.")
 
 
-def user_prompt(name: str, trigger: str, transcript: str, fmt: str = "POINTS") -> str:
-    return USER.format(
+def system_prompt(name: str, mode: str, context: str, aliases: list[str] = (), rules: str = "",
+                  docs: str = "", searched: list[str] = (), max_chars: int | None = None) -> str:
+    """rules (e.g. profiles/sbir/rules.md) go last, after the context and documents, so a long
+    context can't push them out of the model's attention. max_chars (small local models): the
+    documents are trimmed first, then the context; the instructions and rules always stay."""
+    def build(ctx: str, doc_text: str) -> str:
+        out = SYSTEM.format(
+            name=name, name_upper=name.upper(),
+            aliases=", ".join(a for a in aliases if a.lower() != name.lower()) or name,
+            mode_desc=MODE_DESC[mode].format(name=name),
+            context=ctx or "(no context files loaded)",
+        )
+        if doc_text.strip() or searched:
+            out += DOCS.format(NAME=name.upper(), name=name, docs=doc_text.strip() or "(only searched documents)",
+                               searched=SEARCHED.format(names=", ".join(searched)) if searched else "")
+        return out + (RULES.format(rules=rules.strip()) if rules.strip() else "")
+
+    full = build(context, docs)
+    if not max_chars or len(full) <= max_chars:
+        return full
+    over = len(full) - max_chars + 40
+    if docs:
+        cut = min(over, len(docs))
+        docs = docs[: len(docs) - cut] + ("\n[documents truncated]" if cut < len(docs) else "")
+        over -= cut
+    if over > 0:
+        context = context[: max(0, len(context) - over)] + "\n[context truncated]"
+    out = build(context, docs)
+    for _ in range(3):  # the markers and placeholders shift the length a little: settle it exactly
+        excess = len(out) - max_chars
+        if excess <= 0:
+            break
+        context = context[: max(0, len(context) - excess - 25)] + "\n[context truncated]"
+        out = build(context, docs)
+    return out
+
+
+def user_prompt(name: str, trigger: str, transcript: str, fmt: str = "POINTS", excerpts: str = "") -> str:
+    out = USER.format(
         fmt=fmt, trigger=TRIGGER_DESC[trigger].format(name=name), name=name, name_upper=name.upper(),
         transcript=transcript or "(nothing transcribed yet)",
     )
+    if excerpts.strip():
+        out = out.replace("\nTranscript (", f"\nDOCUMENT EXCERPTS (from {name}'s larger documents; may or may not be "
+                                            f"relevant):\n{excerpts.strip()}\n\nTranscript (", 1)
+    return out
 
 
 PRACTICE_FEEDBACK = """Practice session: {name} is rehearsing answers out loud. Coach them.

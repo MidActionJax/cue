@@ -9,11 +9,13 @@ import subprocess
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QActionGroup, QCursor, QIcon
 from PyQt6.QtWidgets import QApplication, QInputDialog, QMenu, QSystemTrayIcon
 
+from . import docs as doclib
 from . import prompts
 from .cli import self_cmd, self_cwd
 from .config import ASSETS, ROOT, resolve
@@ -44,6 +46,8 @@ class Bridge(QObject):
     reload_context = pyqtSignal()
     audio_changed = pyqtSignal(str)
     smart_yes = pyqtSignal(object)           # turn key the local classifier said is for you
+    notify = pyqtSignal(str, str)            # tray notification (title, message)
+    local_ready = pyqtSignal()               # Ollama came up after Cue started
 
 
 class Controller(QObject):
@@ -84,9 +88,13 @@ class Controller(QObject):
         self._silence_since: float | None = None
         self._last_tick = time.monotonic()
         self._refreshing = False
+        self._auto_refreshed = False                # the on-open brief refresh runs once per session
         self._quitting = False
         self._brief_mtime = self._mtime(BRIEF)
         self._next_brief_check = 0.0
+        self.doc_retriever = None
+        self._doc_failed: set = set()               # (path, mtime) of documents that can't be read
+        self._system_local = ""
 
         b = self.bridge
         b.text.connect(self._on_text)
@@ -100,7 +108,10 @@ class Controller(QObject):
         b.reload_context.connect(self.load_mode)
         b.audio_changed.connect(self._on_audio_changed)
         b.smart_yes.connect(self._on_smart_yes)
+        b.notify.connect(lambda title, msg: self.tray.showMessage(title, msg, QIcon(str(ASSETS / "cue.ico")), 8000))
+        b.local_ready.connect(self._on_local_ready)
         ov = self.overlay
+        ov.files_dropped.connect(self.add_documents)
         ov.mode_clicked.connect(self._set_mode)
         ov.trigger_clicked.connect(lambda: self._on_hotkey("cycle_trigger"))
         ov.ask_clicked.connect(lambda: self.ask("manual"))
@@ -121,6 +132,7 @@ class Controller(QObject):
             self._start_audio()
         self._update_title()
         spawn_detached("recover")  # finish any earlier call that closed before its notes were saved
+        threading.Thread(target=self._ensure_local, daemon=True).start()
         if mode or not cfg.ask_mode_on_start:
             self._set_mode(mode or cfg.mode)
         else:
@@ -163,16 +175,25 @@ class Controller(QObject):
         if rules_file and resolve(rules_file).exists():
             rules = load_context([rules_file])[0]
             files.append(f"{rules_file} (rules, last)")
-        self._system = prompts.system_prompt(self.name, self.mode, context, self.cfg.user.aliases, rules)
+        dc = doclib.build(self.mode, int(self._docs_cfg("whole_chars", 120_000)))
+        self.doc_retriever = dc.retriever
+        searched = dc.retriever.names if dc.retriever else []
+        args = (self.name, self.mode, context, self.cfg.user.aliases, rules, dc.whole, searched)
+        self._system = prompts.system_prompt(*args)
+        # small local model: documents are trimmed first, then context; instructions + rules always stay
+        local_system = self._system_local = prompts.system_prompt(*args, max_chars=self.cfg.llm.ollama_context_chars)
         if getattr(self, "stt", None):
             self.stt.vocabulary = load_vocabulary(self.cfg.stt.vocabulary, self.mode)
-        self.backend.configure(self._system)
-        log.info("mode=%s trigger=%s backend=%s context=%d chars from %s",
-                 self.mode, self.trigger, self.backend.name, len(context), files)
+        self.backend.configure(local_system if self.backend.name == "ollama" else self._system)
+        log.info("mode=%s trigger=%s backend=%s context=%d chars from %s; documents: %s",
+                 self.mode, self.trigger, self.backend.name, len(context), files, dc.used or "none")
         # keep the local model loaded with the same context, so a mid-call fallback is instant
         if self.backend.name != "ollama" and OllamaBackend.available(self.cfg.llm.ollama_url):
             self.local = self.local or make_local(self.cfg.llm)
-            self.local.configure(self._system)
+            self.local.configure(local_system)
+        pending = [d for d in dc.missing if d.path.exists() and _doc_key(d) not in self._doc_failed]
+        if pending:  # dropped into the folder by hand: read them in the background, then reload
+            threading.Thread(target=self._extract_docs, args=(pending,), daemon=True).start()
         self.overlay.set_mode(self.mode, self.trigger)
         if not self.practice:
             self._set_home(files)
@@ -186,8 +207,11 @@ class Controller(QObject):
         if self.mode == "work":
             header, groups = work_recap()
             self.overlay.set_home(header, grouped_html(groups + last_call_items(self.name), fs))
-            if not brief_is_current():
-                self.refresh_worklog()  # e.g. Monday before the 7:30 task ran, or the PC was off
+            if not brief_is_current() and not self._auto_refreshed:
+                # e.g. Monday before the 7:30 task ran, or the PC was off. Once per session: if it
+                # can't make the brief current (no new work, Claude down), don't keep retrying.
+                self._auto_refreshed = True
+                self.refresh_worklog()
         elif self.mode == "sbir":
             from .sbir import home_items
             header, groups = home_items()
@@ -218,6 +242,27 @@ class Controller(QObject):
                 self.bridge.status.emit(f"Claude unavailable{hint}. Answering with local {self.cfg.llm.ollama_model}.", 6000)
             else:
                 self.bridge.status.emit(f"Claude unavailable{hint}, and Ollama isn't running.", 8000)
+
+    def _ensure_local(self):
+        url = self.cfg.llm.ollama_url
+        if OllamaBackend.available(url):
+            return
+        if OllamaBackend.start_if_installed(url):
+            self.bridge.local_ready.emit()
+        else:
+            log.warning("local fallback unavailable: Ollama isn't installed or didn't start")
+
+    def _on_local_ready(self):
+        """Ollama came up after the mode loaded: connect the fallback (or the main backend) now."""
+        if not self.mode or not self._system_local:
+            return  # load_mode will pick it up
+        if self.backend.name == "ollama":
+            self.backend.configure(self._system_local)
+        elif self.local is None:
+            self.local = make_local(self.cfg.llm)
+            self.local.configure(self._system_local)
+        log.info("local fallback ready (%s)", self.cfg.llm.ollama_model)
+        self._update_title()
 
     @property
     def trigger(self) -> str:
@@ -470,7 +515,17 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
                 self.last_answer = ""
                 return
             transcript = self.transcript.format(window, self.name)
-        self._last_user = prompts.user_prompt(self.name, kind, transcript, fmt)
+        excerpts = ""
+        if self.doc_retriever and kind != "explain":
+            try:  # what was just said decides which passages of the big documents come along
+                excerpts = self.doc_retriever.query(transcript[-1500:],
+                                                    max_chars=int(self._docs_cfg("excerpt_chars", 5000)))
+            except Exception:
+                log.exception("document search failed")
+        self._last_user = prompts.user_prompt(self.name, kind, transcript, fmt, excerpts)
+        them = [m.group(1) for m in (re.match(r"^(?:\[-\d+s\] )?THEM[^:]*:\s*(.*)", l) for l in transcript.splitlines())
+                if m and m.group(1).strip()]
+        self._newest_them = them[-1].strip() if them else ""
         self.req_kind = kind
         extra = "" if fmt == "POINTS" else f" · {fmt.lower()}"
         self.req_status = status or f"{self.mode.upper()} · {kind}{extra} · {datetime.now():%H:%M:%S}"
@@ -485,7 +540,12 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         self._got_output = False
         self._req_backend = backend
         log.info("asking %s (%s)", backend.name, self.req_kind)
-        rid = self.req_id = backend.ask(self._last_user, lambda r, t: self.bridge.token.emit(r, t),
+        user = self._last_user
+        if backend.name == "ollama" and self.req_kind in ("auto", "smart", "name", "manual") \
+                and getattr(self, "_newest_them", ""):
+            # small local models tend to re-answer an earlier question in the transcript
+            user += f'\n\nThe newest thing they said: "{self._newest_them[:300]}". Answer that, not an earlier question.'
+        rid = self.req_id = backend.ask(user, lambda r, t: self.bridge.token.emit(r, t),
                                         lambda r, t, e: self.bridge.done.emit(r, t, e))
         if backend is not self.local:
             # a stalled Claude call is as bad as a failed one mid-conversation
@@ -749,6 +809,9 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
             sub = menu.addMenu(label)
             sub.aboutToShow.connect(lambda s=sub, src=source: self._fill_device_menu(s, src))
         menu.addSeparator()
+        docs_menu = menu.addMenu("Documents")
+        docs_menu.aboutToShow.connect(lambda m=docs_menu: self._fill_docs_menu(m))
+        menu.addAction("Add documents…", self.pick_documents)
         menu.addAction("Add a quick note…", self._quick_note)
         menu.addAction("Practice answering…", lambda: self._set_mode("practice"))
         menu.addAction("Set up my voice…", self.start_voice_setup)
@@ -804,7 +867,13 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             self._refreshing = False
             ok = r.returncode == 0
-            log.info("worklog finished rc=%s\n%s", r.returncode, (r.stdout + r.stderr)[-1500:])
+            out = r.stdout + r.stderr
+            log.info("worklog finished rc=%s\n%s", r.returncode, out[-1500:])
+            if "another worklog run is in progress" in out:
+                # the 7:30 task (or another Cue) is already on it; the panel picks the new brief up
+                # by itself when it's written (see _tick), so there's nothing to reload now
+                self.bridge.status.emit("Your work brief is already being updated; it'll show up here when it's done.", 6000)
+                return
             self.bridge.status.emit("Work log up to date." if ok else "Work log refresh failed — see the app log.", 4000)
             if ok and self.mode == "work":
                 self.bridge.reload_context.emit()  # all_time.md may have changed too
@@ -821,6 +890,101 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
             if r.returncode == 0 and self.mode == "interview":
                 self.bridge.reload_context.emit()
         threading.Thread(target=run, daemon=True).start()
+
+    # ------------------------------------------------------------------ documents
+    def _docs_cfg(self, key: str, default):
+        return (self.cfg.get("docs") or {}).get(key) or default
+
+    SCOPE_CHOICES = [("All calls", "all"), ("Work calls only", "work"), ("Interview calls only", "interview"),
+                     ("SBIR calls only", "sbir")]
+
+    def pick_documents(self):
+        from PyQt6.QtWidgets import QFileDialog
+        paths, _ = QFileDialog.getOpenFileNames(
+            None, "Cue — add documents", str(Path.home() / "Documents"),
+            "Documents (*.pdf *.docx *.txt *.md);;All files (*.*)")
+        if paths:
+            self.add_documents(paths)
+
+    def add_documents(self, paths: list[str]):
+        """From the file picker or files dropped on the panel: ask which calls, then add in the background."""
+        paths = [p for p in paths if p and Path(p).is_file()]
+        if not paths:
+            return
+        labels = [label for label, _ in self.SCOPE_CHOICES]
+        current = next((i for i, (_, s) in enumerate(self.SCOPE_CHOICES) if s == self.mode), 0)
+        what = Path(paths[0]).name if len(paths) == 1 else f"these {len(paths)} files"
+        choice, ok = QInputDialog.getItem(
+            None, "Cue — add documents",
+            f"Use {what} on which calls?\n\nDocuments are sent to Claude along with your questions, so only add "
+            "material you're allowed to share with an AI tool.", labels, current, False)
+        if not ok:
+            return
+        scope = dict(self.SCOPE_CHOICES)[choice]
+        self.overlay.show_status(f"Reading {what}…", 60_000)
+        threading.Thread(target=self._add_documents, args=(paths, scope), daemon=True).start()
+
+    def _add_documents(self, paths: list[str], scope: str):
+        added, failed = [], []
+        for p in paths:
+            try:
+                doc, note = doclib.add(Path(p), scope)
+                added.append(f"{doc.name}: {note}")
+                log.info("document %s (%s): %s", doc.name, scope, note)
+            except doclib.DocError as e:
+                failed.append(str(e))
+                log.warning("document not added: %s", e)
+            except Exception as e:
+                failed.append(f"{Path(p).name}: couldn't be read ({e.__class__.__name__})")
+                log.exception("document %s failed", p)
+        if added:
+            self.bridge.reload_context.emit()
+            self.bridge.status.emit(f"📄 {added[0]}" + (f" (+{len(added) - 1} more)" if len(added) > 1 else ""), 6000)
+        if failed:
+            self.bridge.notify.emit("Cue couldn't add " + ("a document" if len(failed) == 1 else f"{len(failed)} documents"),
+                                    "\n".join(failed)[:900])
+            if not added:
+                self.bridge.status.emit("Couldn't add that document (see the notification)", 6000)
+
+    def _extract_docs(self, docs: list):
+        """Documents put in the folder by hand: read them once, then reload the answer context."""
+        ok = False
+        for d in docs:
+            try:
+                doclib.ensure_cached(d.path)
+                ok = True
+            except Exception as e:
+                self._doc_failed.add(_doc_key(d))
+                log.warning("document %s can't be used: %s", d.name, e)
+                self.bridge.notify.emit("Cue can't use a document", str(e)[:900])
+        if ok:
+            self.bridge.reload_context.emit()
+
+    def _fill_docs_menu(self, menu: QMenu):
+        menu.clear()
+        menu.addAction("Add documents…", self.pick_documents)
+        menu.addAction("Open documents folder", self._open_docs_folder)
+        docs = doclib.list_docs()
+        if docs:
+            menu.addSeparator()
+        for d in docs:
+            sub = menu.addMenu(d.label)
+            sub.addAction("Open", lambda p=d.path: os.startfile(p))
+            sub.addAction("Remove from Cue", lambda d=d: self._remove_doc(d))
+
+    def _open_docs_folder(self):
+        doclib.DOCS.mkdir(parents=True, exist_ok=True)
+        os.startfile(doclib.DOCS)
+
+    def _remove_doc(self, d):
+        try:
+            doclib.remove(d)
+        except OSError as e:
+            self.overlay.show_status(f"Couldn't remove {d.name}: {e}", 5000)
+            return
+        log.info("document removed: %s (%s)", d.name, d.scope)
+        self.overlay.show_status(f"Removed {d.name}", 3000)
+        self.load_mode()
 
     def build_sbir_prep(self):
         who, ok = QInputDialog.getText(None, "Cue — prep SBIR call", "Who's the call with? (person or organization)")
@@ -875,6 +1039,13 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         # not quit(): in Qt 6 that first asks each window to close, and the panel refuses
         # (its close routes back here), which cancels the quit
         QApplication.exit(0)
+
+
+def _doc_key(d) -> tuple:
+    try:
+        return str(d.path), d.path.stat().st_mtime
+    except OSError:
+        return str(d.path), 0.0
 
 
 def mode_label(mode: str) -> str:

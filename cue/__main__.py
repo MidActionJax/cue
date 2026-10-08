@@ -93,6 +93,7 @@ def main():
     ap.add_argument("--demo", action="store_true", help="no audio: inject a fake question to test overlay + LLM")
     ap.add_argument("--mode", choices=["work", "interview", "sbir"], help="skip the start-screen chooser")
     ap.add_argument("--quit", action="store_true", help="end the running Cue's call (notes saved) and exit")
+    ap.add_argument("--demo-script", help=argparse.SUPPRESS)  # testing: a text file, one 'them' line per row
     args = ap.parse_args()
 
     logs = config.DATA / "logs"
@@ -140,6 +141,9 @@ def main():
         import numpy as np
 
         lines = DEMO.get(args.mode or "", DEMO["work"])
+        if args.demo_script:
+            rows = open(args.demo_script, encoding="utf-8").read().splitlines()
+            lines = [("them", r.strip()) for r in rows if r.strip()]
 
         def inject(i=0):  # one line at a time, like a real call (each question gets its own answer)
             src, text = lines[i]

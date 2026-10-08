@@ -6,6 +6,8 @@
     Cue.exe prep                 build interview prep
     Cue.exe prep-sbir "Pat Lee"   prep sheet for an SBIR call (person or organization)
     Cue.exe sbir-sync            import your SBIR tracker spreadsheets into contacts.md
+    Cue.exe docs add FILE...     add PDFs / Word / text as answer context (--scope work|interview|sbir)
+    Cue.exe docs list | remove NAME
     Cue.exe accent-test FILE     compare Whisper models on a recording
     Cue.exe devices              list audio devices
     Cue.exe notes finalize|recover ...   (internal: finishing a call's notes)
@@ -53,6 +55,8 @@ def main() -> int:
     if cmd == "sbir-sync":
         from worklog.sbir_sync import main as sbir_sync_main
         return sbir_sync_main(rest)
+    if cmd == "docs":
+        return _docs(rest)
     if cmd == "note":
         from .journal import add
         add(" ".join(rest))
@@ -71,6 +75,52 @@ def main() -> int:
         list_devices()
         return 0
     print(__doc__)
+    return 2
+
+
+def _docs(args: list[str]) -> int:
+    """cue-cli docs list | add FILE... [--scope all|work|interview|sbir] | remove NAME"""
+    from pathlib import Path
+
+    from . import docs
+    if not args or args[0] == "list":
+        found = docs.list_docs()
+        for d in found:
+            text = docs.cached_text(d.path)
+            print(f"  {d.label:<60} {len(text):>9,} chars" if text is not None else f"  {d.label:<60} (not read yet)")
+        print(f"{len(found)} document(s) in {docs.DOCS}")
+        return 0
+    if args[0] == "add":
+        scope, files = "all", []
+        it = iter(args[1:])
+        for a in it:
+            if a == "--scope":
+                scope = next(it, "all")
+            else:
+                files.append(a)
+        if scope not in docs.SCOPES or not files:
+            print(_docs.__doc__)
+            return 2
+        bad = 0
+        for f in files:
+            try:
+                d, note = docs.add(Path(f), scope)
+                print(f"  {d.label}: {note}")
+            except docs.DocError as e:
+                bad += 1
+                print(f"  NOT ADDED: {e}")
+        return 1 if bad else 0
+    if args[0] == "remove" and len(args) > 1:
+        name = " ".join(args[1:]).lower()
+        hits = [d for d in docs.list_docs() if d.name.lower() == name] or \
+               [d for d in docs.list_docs() if name in d.name.lower()]
+        if len(hits) != 1:
+            print(f"{'No' if not hits else 'More than one'} document matches {name!r}")
+            return 1
+        docs.remove(hits[0])
+        print(f"  removed {hits[0].label}")
+        return 0
+    print(_docs.__doc__)
     return 2
 
 

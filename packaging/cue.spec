@@ -33,6 +33,7 @@ datas = [
     (os.path.join(REPO, "profiles", "interview", "README.md"), os.path.join("profiles", "interview")),
     (os.path.join(REPO, "profiles", "sbir", "*.example.md"), os.path.join("profiles", "sbir")),
     (os.path.join(REPO, "profiles", "sbir", "README.md"), os.path.join("profiles", "sbir")),
+    (os.path.join(REPO, "profiles", "docs", "README.md"), os.path.join("profiles", "docs")),
     (os.path.join(REPO, "models", "wespeaker_en_voxceleb_resnet34_LM.onnx"), "models"),
 ]
 datas += collect_data_files("faster_whisper")

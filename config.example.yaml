@@ -51,6 +51,12 @@ modes:
     # Read last, after all the context, so a long contacts file can't push it out of attention.
     rules: profiles/sbir/rules.md
 
+# Documents you add (tray → Add documents…, drag files onto the panel, or cue-cli docs add):
+# PDFs, Word (.docx) and text. They live in profiles/docs/ (every call) or profiles/docs/<mode>/.
+docs:
+  whole_chars: 120000         # documents up to this much text (in total) go to the model whole
+  excerpt_chars: 5000         # bigger ones are searched: this much of the best-matching passages per question
+
 hotkeys:
   # "someone just asked me something" — works in every trigger mode. The key still reaches
   # your other apps (Tab in a chat box still works); alt+tab / ctrl+tab don't trigger it.

@@ -27,3 +27,6 @@ profiles/sbir/*
 cue_home.txt
 # bundled at build time; setup.ps1 downloads it
 models/
+# your documents stay private; only the README ships
+profiles/docs/*
+!profiles/docs/README.md

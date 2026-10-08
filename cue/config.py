@@ -65,6 +65,7 @@ USER_FILES = [
     ("profiles/work/workstreams.example.md", "profiles/work/workstreams.md"),
     ("profiles/interview/README.md", "profiles/interview/README.md"),
     ("profiles/sbir/README.md", "profiles/sbir/README.md"),
+    ("profiles/docs/README.md", "profiles/docs/README.md"),
     ("profiles/sbir/offer.example.md", "profiles/sbir/offer.md"),
     ("profiles/sbir/proof.example.md", "profiles/sbir/proof.md"),
     ("profiles/sbir/rules.example.md", "profiles/sbir/rules.md"),

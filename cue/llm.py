@@ -251,6 +251,37 @@ class OllamaBackend(Backend):
         except Exception:
             return False
 
+    @staticmethod
+    def start_if_installed(url: str = "http://localhost:11434", wait_s: float = 20) -> bool:
+        """Ollama installed but not running (closed, crashed, not started at login): start its
+        server in the background so the mid-call fallback exists. True once it answers."""
+        if OllamaBackend.available(url):
+            return True
+        if "localhost" not in url and "127.0.0.1" not in url:
+            return False
+        exe = shutil.which("ollama") or os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Ollama", "ollama.exe")
+        if not os.path.isfile(exe):
+            return False
+        log.info("Ollama isn't running; starting it for the local fallback")
+        flags = _NO_WINDOW | getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        breakaway = 0x01000000  # CREATE_BREAKAWAY_FROM_JOB: keep running after Cue exits
+        for extra in (breakaway, 0):  # breakaway is refused inside some job objects: then plain detached
+            try:
+                subprocess.Popen([exe, "serve"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, creationflags=flags | extra, close_fds=True)
+                break
+            except OSError as e:
+                if not extra:
+                    log.warning("couldn't start Ollama: %s", e)
+                    return False
+        end = time.time() + wait_s
+        while time.time() < end:
+            if OllamaBackend.available(url):
+                log.info("Ollama started")
+                return True
+            time.sleep(0.5)
+        return False
+
     def configure(self, system: str) -> None:
         if len(system) > self.max_context_chars:
             system = system[: self.max_context_chars] + "\n[context truncated]"
