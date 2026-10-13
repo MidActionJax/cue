@@ -209,6 +209,49 @@ class AudioManager:
                 self._pa.terminate()
 
 
+class CallRecorder:
+    """The other side's audio for the accurate after-call pass: raw 16 kHz int16 PCM appended as
+    it arrives (nothing to lose if the app dies), with silence written for the gaps WASAPI
+    loopback leaves while nobody talks, so offsets in the file line up with wall-clock time.
+    Deleted once the call's final notes are written."""
+
+    MAX_GAP_S = 600
+
+    def __init__(self, path):
+        self.path = path
+        self.started: float | None = None      # wall clock of sample 0
+        self._t0: float | None = None
+        self._written = 0
+        self._lock = threading.Lock()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._f = open(path, "ab")
+
+    def write(self, t_mono: float, frame: np.ndarray) -> None:
+        with self._lock:
+            if self._f is None:
+                return
+            if self._t0 is None:
+                self._t0 = t_mono
+                self.started = time.time() - (time.monotonic() - t_mono)
+                try:  # so a call whose app died can still be re-transcribed later
+                    self.path.with_suffix(".start").write_text(repr(self.started), encoding="utf-8")
+                except OSError:
+                    pass
+            behind = int((t_mono - self._t0) * SR) - self._written
+            if behind > SR // 4:   # a silent stretch: keep the timeline
+                pad = min(behind, SR * self.MAX_GAP_S)
+                self._f.write(b"\x00\x00" * pad)
+                self._written += pad
+            self._f.write(frame.tobytes())
+            self._written += len(frame)
+
+    def close(self) -> None:
+        with self._lock:
+            if self._f:
+                self._f.close()
+                self._f = None
+
+
 @dataclass
 class Utterance:
     source: str            # "them" | "me"
@@ -235,6 +278,7 @@ class Segmenter:
     partial_every_s: float = 1.5
     emit_utterances: bool = True
     gate: Callable[[], bool] | None = None   # return True to ignore speech right now (echo guard)
+    tap: Callable[[float, np.ndarray], None] | None = None   # every frame, e.g. CallRecorder.write
 
     _stop: threading.Event = field(default_factory=threading.Event)
 
@@ -280,6 +324,13 @@ class Segmenter:
                     self.on_speaking(self.source, False)
                 continue
             last_frame_t = time.monotonic()
+            tap = self.tap
+            if tap:
+                try:
+                    tap(t, frame)
+                except Exception as e:  # recording must never stop the live transcript
+                    log.warning("call recording stopped: %s", e)
+                    self.tap = None
 
             is_speech = vad.is_speech(frame.tobytes(), SR)
             if is_speech and self.gate and self.gate():

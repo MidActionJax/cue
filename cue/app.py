@@ -153,12 +153,24 @@ class Controller(QObject):
         self.mode = mode
         if first and self.cfg.notes.enabled:
             self.notes = self._new_notes()
+            self._record_call(self.notes)
             # anything said while you were choosing still counts, at the time it was said
             for l in self.transcript.lines(include_partials=False):
                 self.notes.add_line(self._label(l.speaker), l.text, datetime.fromtimestamp(l.t_start))
         elif self.notes:
             self.notes.write_sidecar()
         self.load_mode()
+
+    def _record_call(self, notes: NoteTaker) -> None:
+        """The other side's audio, for the accurate after-call pass (deleted once the notes exist)."""
+        if not (self.audio and self.cfg.notes.get("accurate_pass", True) and getattr(self, "segs", None)):
+            return
+        from .audio import CallRecorder
+        from .notes import CALLS
+        rec = CallRecorder(CALLS / f"{notes.stamp}.them.pcm")
+        notes.attach_recorder(rec)
+        self.segs[0].tap = rec.write
+        log.info("recording the call audio for the accurate notes pass")
 
     def _new_notes(self) -> NoteTaker:
         return NoteTaker(self.cfg.notes, self.cfg.llm, self.name,
@@ -388,8 +400,8 @@ class Controller(QObject):
         for l in self.transcript.lines()[-120:]:
             if l.speaker == "me":
                 who, color = self.name.upper(), "#9be3b0"
-            elif l.who.startswith("Speaker "):  # unnamed: click to say who it is
-                who, color = f"<a href='spk:{quote(l.who)}' style='color:#9fc0ff'>{l.who} ✎</a>", "#9fc0ff"
+            elif l.who and l.who != "In room":  # click to name them, or to fix a wrong name
+                who, color = f"<a href='spk:{quote(l.who)}' style='color:#9fc0ff'>{html.escape(l.who)} ✎</a>", "#9fc0ff"
             else:
                 who, color = html.escape(l.who or "THEM"), "#9fc0ff"
             partial = id(l) not in finals
@@ -661,16 +673,40 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
     def _name_speaker(self, label: str):
         if not self.speakers:
             return
-        name, ok = QInputDialog.getText(None, "Cue — who is this?", f"Name for {label} (their voice is remembered):")
+        unnamed = label.startswith("Speaker ")
+        prompt = (f"Name for {label} (their voice is remembered):" if unnamed else
+                  f"Who is this really? Every line marked {label} on this call (and the notes) will be relabeled.\n"
+                  f"If Cue keeps mixing {label} up on other calls too, use tray → Saved voices → Forget.")
+        name, ok = QInputDialog.getText(None, "Cue — who is this?", prompt)
         name = name.strip()
-        if not ok or not name:
+        if not ok or not name or name == label:
             return
-        self.speakers.name_speaker(label, name)
+        if unnamed:
+            self.speakers.name_speaker(label, name)
+        else:
+            self.speakers.correct(label, name)
         self.transcript.relabel(label, name)
         if self.notes:
             self.notes.rename_speaker(label, name)
         self._refresh_transcript_pane()
-        self.overlay.show_status(f"{label} is {name} — recognized automatically from now on", 3500)
+        self.overlay.show_status(f"{label} is {name} — recognized automatically from now on" if unnamed
+                                 else f"Relabeled {label} as {name} for this call", 3500)
+
+    def _fill_voices_menu(self, menu: QMenu):
+        from .speakers import saved_voices
+        menu.clear()
+        names = saved_voices()
+        if not names:
+            menu.addAction("No saved voices yet").setEnabled(False)
+        for n in names:
+            sub = menu.addMenu(n)
+            sub.addAction("Forget this voice (it's matching the wrong person)", lambda n=n: self._forget_voice(n))
+
+    def _forget_voice(self, name: str):
+        from .speakers import forget_voice
+        ok = self.speakers.forget(name) if self.speakers else forget_voice(name)
+        self.overlay.show_status(f"Forgot {name}'s voice. Name them again when they next speak." if ok
+                                 else f"No saved voice for {name}", 4000)
 
     def _quick_note(self):
         from .journal import add
@@ -815,6 +851,8 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         menu.addAction("Add a quick note…", self._quick_note)
         menu.addAction("Practice answering…", lambda: self._set_mode("practice"))
         menu.addAction("Set up my voice…", self.start_voice_setup)
+        voices_menu = menu.addMenu("Saved voices")
+        voices_menu.aboutToShow.connect(lambda m=voices_menu: self._fill_voices_menu(m))
         menu.addSeparator()
         menu.addAction("Refresh work log now", self.refresh_worklog)
         menu.addAction("Build interview prep", self.build_interview_prep)

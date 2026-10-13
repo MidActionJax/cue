@@ -77,6 +77,21 @@ class Transcriber:
         import numpy as np
         list(self.model.transcribe(np.zeros(16000, dtype="float32"), language=self.cfg.language)[0])
         self.ready.set()
+        if self.cfg.accurate_speakers:
+            # load it now, off the transcription thread: it may even need downloading (~3 GB), and
+            # the live transcript must never wait for it (the fast model covers until it's ready)
+            threading.Thread(target=self._load_accurate, name="stt-accurate", daemon=True).start()
+
+    def _load_accurate(self) -> None:
+        from faster_whisper import WhisperModel
+        t = time.time()
+        try:
+            model = WhisperModel(self.cfg.accurate_model, device=self.cfg.device, compute_type=self.cfg.compute_type)
+            self.accurate = model
+            log.info("accurate model %s ready in %.1fs (for %s)", self.cfg.accurate_model, time.time() - t,
+                     ", ".join(self.cfg.accurate_speakers))
+        except Exception as e:
+            log.warning("accurate model %s unavailable (%s); everyone uses %s", self.cfg.accurate_model, e, self.cfg.model)
 
     def submit(self, utt: Utterance) -> None:
         if utt.final:
@@ -129,13 +144,7 @@ class Transcriber:
         wanted = [s.lower() for s in (self.cfg.accurate_speakers or [])]
         if not (utt.final and utt.who and utt.who.lower() in wanted):
             return self.model
-        if self.accurate is None:
-            from faster_whisper import WhisperModel
-            t = time.time()
-            self.accurate = WhisperModel(self.cfg.accurate_model, device=self.cfg.device,
-                                         compute_type=self.cfg.compute_type)
-            log.info("accurate model %s loaded in %.1fs (for %s)", self.cfg.accurate_model, time.time() - t, utt.who)
-        return self.accurate
+        return self.accurate or self.model   # still loading: never hold up the live transcript
 
     def _transcribe(self, utt: Utterance) -> str:
         import numpy as np

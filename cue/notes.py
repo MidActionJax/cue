@@ -171,6 +171,10 @@ class NoteTaker:
         self._file = None
         self._finalized = False
         self.speaker_names: dict[str, str] = {}   # "Speaker 2" -> "Sam", named mid-call
+        self.recorder = None                      # the other side's audio, for the accurate after-call pass
+
+    def attach_recorder(self, recorder) -> None:
+        self.recorder = recorder
 
     def _open(self) -> None:
         if self._file is None:
@@ -180,9 +184,10 @@ class NoteTaker:
 
     def write_sidecar(self) -> None:
         CALLS.mkdir(parents=True, exist_ok=True)
-        (CALLS / f"{self.stamp}.json").write_text(json.dumps(
-            {"mode": self.get_mode(), "started": self.started.isoformat(), "speakers": self.speaker_names}),
-            encoding="utf-8")
+        meta = {"mode": self.get_mode(), "started": self.started.isoformat(), "speakers": self.speaker_names}
+        if self.recorder is not None and self.recorder.started:
+            meta["audio"] = {"file": self.recorder.path.name, "started": self.recorder.started}
+        (CALLS / f"{self.stamp}.json").write_text(json.dumps(meta), encoding="utf-8")
 
     def rename_speaker(self, label: str, name: str) -> None:
         self.speaker_names[label] = name
@@ -240,8 +245,11 @@ class NoteTaker:
         if self._file:
             self._file.close()
             self._file = None
+        if self.recorder is not None:
+            self.recorder.close()
         if self._total_words < self.cfg.min_call_words:
             log.info("call too short for notes (%d words)", self._total_words)
+            _delete_audio(self.stamp)
             if self.transcript_path.exists():
                 _mark_done(self.stamp)
             return
@@ -282,6 +290,17 @@ def _mark_done(stamp: str) -> None:
     (CALLS / f"{stamp}.done").write_text(datetime.now().isoformat(), encoding="utf-8")
 
 
+def _delete_audio(stamp: str) -> None:
+    p = CALLS / f"{stamp}.them.pcm"
+    try:
+        if p.exists():
+            p.unlink()
+            log.info("deleted the call audio for %s", stamp)
+        p.with_suffix(".start").unlink(missing_ok=True)
+    except OSError as e:
+        log.warning("couldn't delete %s: %s", p.name, e)
+
+
 def finalize(stamp: str) -> None:
     """Final notes (Sonnet) + learning for one call. Only marks the call done if both succeed,
     so a usage-limit failure gets retried by recover()."""
@@ -303,6 +322,14 @@ def finalize(stamp: str) -> None:
         title = {"interview": "Interview", "sbir": "SBIR call"}.get(mode, "Team call")
         # the on-screen suggestions were private: the notes must only reflect what was said aloud
         spoken = "\n".join(l for l in transcript.splitlines() if "ASSIST (shown)" not in l)
+        if cfg.notes.get("accurate_pass", True):
+            try:  # full-context re-transcription + whole-call speaker matching; the live one is the fallback
+                from . import accurate
+                better = accurate.run(stamp, cfg, meta, transcript, mode)
+                if better:
+                    spoken = better
+            except Exception:
+                log.exception("accurate pass failed for %s; using the live transcript", stamp)
         aliases = ", ".join(a for a in cfg.user.aliases if a.lower() != name.lower())
         prompt = FINAL.format(kind=KIND[mode], name=name, NAME=name.upper(), aliases=aliases,
                               when=f"{start:%Y-%m-%d %H:%M}", minutes=minutes, glossary=_glossary(),
@@ -320,6 +347,7 @@ def finalize(stamp: str) -> None:
             _save_promises(text, start)
     if cfg.notes.learn:
         learn(cfg, transcript, mode, start)
+    _delete_audio(stamp)   # only once the notes exist: a failed run keeps it for recover()
     _mark_done(stamp)
     log.info("finalized %s", stamp)
 
@@ -361,6 +389,10 @@ def recover() -> None:
     limit). Run at app start and by the daily worklog job, before it reads meeting notes."""
     from . import config
     cfg = config.load()
+    # call audio is never kept long, even for a call that couldn't be finished
+    for p in CALLS.glob("*.them.pcm") if CALLS.exists() else []:
+        if time.time() - p.stat().st_mtime > 7 * 86400:
+            _delete_audio(p.name.split(".")[0])
     for stamp in pending_calls():
         words = sum(len(l.split(": ", 1)[-1].split()) for l in
                     (CALLS / f"{stamp}.txt").read_text(encoding="utf-8").splitlines() if "ASSIST (shown)" not in l)

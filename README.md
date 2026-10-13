@@ -209,9 +209,13 @@ compare models side by side: `cue-cli accent-test "meeting.mp4" --start 120 --le
 ## Your data
 
 - **Stays on your machine**, in the data folder you picked at install (`%USERPROFILE%\Cue` by
-  default; the repo folder when running from source): audio (never saved), transcripts, notes,
+  default; the repo folder when running from source): transcripts, notes,
   voice fingerprints, what Cue learned, and your work brief. To move it, move the folder and edit
   the path in `cue_home.txt` next to `Cue.exe`.
+- **Call audio** is saved only temporarily: the other side's audio is recorded during the call so
+  the notes can come from an accurate second pass (big model, full context, speakers matched
+  across the whole call), and it's deleted as soon as the notes are written (anything left over
+  is deleted after 7 days). Turn it off with `notes.accurate_pass: false`; then audio is never saved.
 - **Sent to Claude** (through your own account): transcript snippets when you ask for an answer,
   and your summaries/notes when they're generated. Set `llm.backend: ollama` and
   `notes.live_backend: local` to keep live calls fully offline.

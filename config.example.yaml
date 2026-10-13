@@ -149,6 +149,11 @@ notes:
   live_backend: auto          # auto = Claude Haiku, switching to the local model when Claude is unavailable | local | claude
   live_model: haiku           # Claude model if the local one is unavailable
   final_model: sonnet
+  # Accurate pass: the other side's audio is saved during the call, re-transcribed after it with
+  # the big model and full context, and speakers are matched across the whole call; the final
+  # notes are written from that. The audio is deleted as soon as the notes exist.
+  accurate_pass: true
+  accurate_model: large-v3
   # After each call, compare what was suggested with what you actually said and update
   # profiles/voice.md (how you talk) + profiles/learned.md (facts, what you use/ignore).
   # Previous versions are kept in data/learn_history/.
