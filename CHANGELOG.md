@@ -17,8 +17,8 @@
 - Every answer gets a fresh Claude session (a warm spare is always ready): earlier questions and
   answers no longer bleed into later ones, and requests stay small.
 - What Cue learns on calls is kept per mode (`profiles/<mode>/learned.md`): team calls no longer
-  see SBIR pricing or job-search details, and the other way round. Older configs are mapped
-  automatically.
+  see SBIR pricing or job-search details, and the other way round. An older shared
+  profiles/learned.md becomes the team-call file on first start (backup kept); old configs are mapped.
 
 - Team-call context leaves out the "side projects" sections of the brief and history, and the
   daily job keeps job hunting and side businesses out of the work history's snapshot, people and

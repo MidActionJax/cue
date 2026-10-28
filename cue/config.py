@@ -84,8 +84,30 @@ def _fill_missing(mine: dict, defaults: dict) -> dict:
     return mine
 
 
+def _migrate_learned() -> None:
+    """0.3: what Cue learns on calls is kept per mode. An older shared profiles/learned.md becomes
+    the team-call file (where most of it came from); SBIR and interview calls start their own,
+    which is the point: one shared file mixed job, consulting and job-search facts into every
+    answer. The original is kept in data/learn_history/."""
+    old, new = ROOT / "profiles" / "learned.md", ROOT / "profiles" / "work" / "learned.md"
+    if not old.exists():
+        return
+    hist = DATA / "learn_history"
+    hist.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(old, hist / "learned-shared-before-0.3.md")
+    if not new.exists():
+        new.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(old), str(new))
+    else:
+        old.unlink()
+
+
 def ensure_user_files() -> None:
     DATA.mkdir(parents=True, exist_ok=True)
+    try:
+        _migrate_learned()
+    except OSError:
+        pass
     for src, dst in USER_FILES:
         s, d = APP_DIR / src, ROOT / dst
         if s.exists() and not d.exists():
