@@ -65,6 +65,10 @@ class Controller(QObject):
         self.audio = None
         self.speakers = None                        # voice fingerprints (you vs. room; who's talking)
         self.practice: PracticeSession | None = None
+        self.trainer = None                         # TrainerSession while a coding round is on
+        self._hotkeys: dict = {}
+        self._trainer_keys: dict = {}
+        self._answer_new = True
         self._enroll: dict | None = None            # voice setup in progress
         self.script = bool(load_ui_state().get("script", False))
         self._last_tab = 0.0
@@ -141,6 +145,11 @@ class Controller(QObject):
 
     # ------------------------------------------------------------------ setup
     def _set_mode(self, mode: str):
+        if mode == "trainer":
+            self.start_trainer()
+            return
+        if self.trainer:   # leaving a coding round for a real call
+            self.end_trainer(show_chooser=False)
         if mode == "practice":
             from .practice import default_kind
             self.start_practice(self.mode or default_kind())
@@ -182,6 +191,9 @@ class Controller(QObject):
     def load_mode(self):
         if self.mode is None:
             return
+        if self.mode == "trainer":
+            self._load_trainer_mode()
+            return
         self._system, local_system, files, dc = build_system(self.cfg, self.mode)
         if self.speakers:   # match the saved voices of this kind of call
             self.speakers.set_mode(self.practice.kind if self.practice else self.mode)
@@ -202,6 +214,26 @@ class Controller(QObject):
         self.overlay.set_mode(self.mode, self.trigger)
         if not self.practice:
             self._set_home(files)
+        self._update_title()
+        self._refresh_tray()
+        if isinstance(self.backend, ClaudeCLIBackend):
+            threading.Thread(target=self._check_backend, args=(self.backend,), daemon=True).start()
+
+    def _load_trainer_mode(self):
+        """Answers in a coding round are about the problem; the context is only for how you talk."""
+        from .trainer.prompts import ANSWER_SYSTEM
+        entries = (self.cfg.modes.get("trainer") or {}).get("context") or ["profiles/me.md", "profiles/voice.md"]
+        context, _ = load_context(entries)
+        self._system = ANSWER_SYSTEM.format(name=self.name, NAME=self.name.upper(), context=context or "(none)")
+        self._system_local = self._system[: int(self.cfg.llm.ollama_context_chars)]
+        self.doc_retriever = None
+        if self.speakers:
+            self.speakers.set_mode("interview")   # mock interviewers are interview voices
+        self.backend.configure(self._system_local if self.backend.name == "ollama" else self._system)
+        if self.backend.name != "ollama" and OllamaBackend.available(self.cfg.llm.ollama_url):
+            self.local = self.local or make_local(self.cfg.llm)
+            self.local.configure(self._system_local)
+        self.overlay.set_mode("trainer", self.trigger)
         self._update_title()
         self._refresh_tray()
         if isinstance(self.backend, ClaudeCLIBackend):
@@ -356,7 +388,29 @@ class Controller(QObject):
         import keyboard
         for action, combo in self.cfg.hotkeys.items():
             # suppress=False: the key still reaches whatever app you're in
-            keyboard.add_hotkey(combo, lambda a=action: self.bridge.hotkey.emit(a), suppress=False)
+            self._hotkeys[action] = keyboard.add_hotkey(combo, lambda a=action: self.bridge.hotkey.emit(a), suppress=False)
+
+    def _trainer_hotkeys(self, on: bool):
+        """Trainer mode swaps Tab / Shift+Tab (which indent code) for its own keys, and back."""
+        import keyboard
+        try:
+            for action in ("answer", "explain"):
+                if on and action in self._hotkeys:
+                    keyboard.remove_hotkey(self._hotkeys.pop(action))
+                elif not on and action not in self._hotkeys and action in self.cfg.hotkeys:
+                    self._hotkeys[action] = keyboard.add_hotkey(
+                        self.cfg.hotkeys[action], lambda a=action: self.bridge.hotkey.emit(a), suppress=False)
+            if on:
+                for action, combo in ((self.cfg.get("trainer") or {}).get("hotkeys") or {}).items():
+                    if action not in self._trainer_keys and combo:
+                        self._trainer_keys[action] = keyboard.add_hotkey(
+                            combo, lambda a=action: self.bridge.hotkey.emit(f"trainer_{a}"), suppress=False)
+            else:
+                for handle in self._trainer_keys.values():
+                    keyboard.remove_hotkey(handle)
+                self._trainer_keys = {}
+        except Exception:
+            log.exception("couldn't switch hotkeys for trainer mode")
 
     # ------------------------------------------------------------------ events
     def _on_text(self, utt, text: str):
@@ -378,6 +432,8 @@ class Controller(QObject):
             return
         if self.notes:
             self.notes.add_line(label, text, datetime.fromtimestamp(utt.t_start))
+        if self.trainer:
+            self.trainer.on_line(speaker == "me", text)
         if self.practice:
             if speaker == "me":
                 self.practice.on_my_words(text)
@@ -466,6 +522,13 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
             self.them_speaking = speaking
 
     def _on_hotkey(self, action: str):
+        if action.startswith("trainer_"):
+            self._on_trainer_hotkey(action[len("trainer_"):])
+            return
+        if self.trainer and action in ("toggle_mode", "hide"):
+            if action == "hide":   # in a coding round: show / hide the trainer windows
+                self.trainer.toggle_windows()
+            return   # Ctrl+Alt+M mid-round would end it: switch modes from the panel instead
         if action == "answer":
             now = time.monotonic()
             double = now - self._last_tab < 0.6
@@ -479,8 +542,8 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         elif action == "explain":
             self.ask("explain")
         elif action == "toggle_mode":
-            modes = list(self.cfg.modes)
-            self._set_mode(modes[(modes.index(self.mode) + 1) % len(modes)] if self.mode else modes[0])
+            modes = [m for m in self.cfg.modes if m != "trainer"]
+            self._set_mode(modes[(modes.index(self.mode) + 1) % len(modes)] if self.mode in modes else modes[0])
         elif action == "cycle_trigger" and self.mode:
             self._set_trigger(TRIGGERS[(TRIGGERS.index(self.trigger) + 1) % len(TRIGGERS)])
         elif action == "hide":
@@ -491,6 +554,21 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
                 self.overlay.show_answer(self.req_status, self.last_answer)
         elif action == "quit":
             self.quit()
+
+    def _on_trainer_hotkey(self, action: str):
+        if not self.trainer:
+            return
+        if action == "answer":
+            now = time.monotonic()
+            double = now - self._last_tab < 0.6
+            self._last_tab = now
+            self.ask("manual", fmt="SCRIPT" if double else None)
+        elif action == "explain":
+            self.ask("explain")
+        elif action == "narrate":
+            self.ask("manual", fmt="NARRATE", status=f"TRAINER · narrate · {datetime.now():%H:%M:%S}")
+        else:
+            self.trainer.hotkey(action)
 
     # ------------------------------------------------------------------ LLM
     def _claude_down(self) -> bool:
@@ -509,7 +587,7 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         backend = self.local if (self._claude_down() and self.local) else self.backend
         window = 60 if kind == "explain" else (self.cfg.transcript.buffer_s if backend.name != "ollama" else 120)
         if transcript is None:
-            if kind in ("manual", "explain") and not any(
+            if kind in ("manual", "explain") and not self.trainer and not any(
                     l.speaker == "them" for l in self.transcript.lines(window, include_partials=True)):
                 self._reset_fade()
                 self.overlay.show_answer(f"{self.mode.upper()} · {kind}",
@@ -521,7 +599,7 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
                 return
             transcript = self.transcript.format(window, self.name)
         excerpts = ""
-        if self.doc_retriever and kind != "explain":
+        if self.doc_retriever and kind != "explain" and not self.trainer:
             try:  # what was just said decides which passages of the big documents come along
                 excerpts = self.doc_retriever.query(transcript[-1500:],
                                                     max_chars=int(self._docs_cfg("excerpt_chars", 5000)))
@@ -529,17 +607,21 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
                 log.exception("document search failed")
         recent = [] if kind in ("explain", "practice") else \
             [q for t, q in self._answered if time.time() - t < min(window, 300)][-3:]
-        self._last_user = prompts.user_prompt(self.name, kind, transcript, fmt, excerpts, recent)
+        if self.trainer:   # about the coding problem: the answer sees the spec, the design and your code
+            self._last_user = self.trainer.answer_prompt(prompts.TRIGGER_DESC[kind].format(name=self.name), fmt, transcript)
+        else:
+            self._last_user = prompts.user_prompt(self.name, kind, transcript, fmt, excerpts, recent)
         them = [m.group(1) for m in (re.match(r"^(?:\[-\d+s\] )?THEM[^:]*:\s*(.*)", l) for l in transcript.splitlines())
                 if m and m.group(1).strip()]
         self._newest_them = them[-1].strip() if them else ""
         self.req_kind = kind
         extra = "" if fmt == "POINTS" else f" · {fmt.lower()}"
         self.req_status = status or f"{self.mode.upper()} · {kind}{extra} · {datetime.now():%H:%M:%S}"
+        self._answer_new = True
         self._start_request(backend)
         self._reset_fade()
         if kind in ("manual", "explain", "practice"):
-            self.overlay.show_answer(self.req_status, "")
+            self._show(self.req_status, "")
 
     def _start_request(self, backend):
         self._t_ask = time.monotonic()
@@ -587,7 +669,7 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
             self._first_token = True
             self._reset_fade()
             log.info("first token after %.2fs", time.monotonic() - self._t_ask)
-        self.overlay.show_answer(self.req_status, text)
+        self._show(self.req_status, text)
 
     def _on_done(self, rid: int, text: str, err):
         if rid != self.req_id:
@@ -606,16 +688,16 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
                 log.warning("dropped a %s answer (%s): %s", self._req_backend.name, problem, text.replace("\n", " | ")[:300])
                 if self.req_kind in ("manual", "explain"):
                     until = f" until {datetime.fromtimestamp(self._claude_down_until):%H:%M}" if self._claude_down() else ""
-                    self.overlay.show_answer(self.req_status, "Q: The backup model couldn't answer that well\n"
-                                             f"- Claude is unavailable{until}; press Tab again to retry")
+                    self._show(self.req_status, "Q: The backup model couldn't answer that well\n"
+                               f"- Claude is unavailable{until}; press Tab again to retry")
                 elif self.overlay.showing_answer:
                     self.overlay.fade_out()
                 return
         if self._maybe_skip(text):
             log.info("model: not a question for %s (SKIP)", self.name)
             if self.req_kind in ("manual", "explain"):
-                self.overlay.show_answer(self.req_status, "Q: No question for you in the last few minutes\n"
-                                         "- Press Tab again right after you're asked, or What? to decode the last speaker")
+                self._show(self.req_status, "Q: No question for you in the last few minutes\n"
+                           "- Press Tab again right after you're asked, or What? to decode the last speaker")
             elif self.overlay.showing_answer:
                 self.overlay.fade_out()
             return
@@ -624,13 +706,21 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         if q and self.req_kind not in ("explain", "practice"):
             self._answered.append((time.time(), q))
             self._answered = self._answered[-6:]
-        self.overlay.show_answer(self.req_status, text)
+        self._show(self.req_status, text)
         if self.notes:
             self.notes.add_assist(text)  # lets the post-call learning compare this with what you said
         if self.practice and self.req_kind == "practice":
             self._practice_actions(reviewed=True)
         log.info("ASSIST: %s", text.replace("\n", " | "))
         print("  ASSIST:\n    " + text.replace("\n", "\n    "), flush=True)
+
+    def _show(self, status: str, text: str):
+        """An answer (streaming or done): the Answers window in a coding round, else the panel."""
+        if self.trainer:
+            self.trainer.show_answer(status, text, new=self._answer_new)
+            self._answer_new = False
+        else:
+            self.overlay.show_answer(status, text)
 
     # ------------------------------------------------------------------ fade logic + periodic checks
     def _reset_fade(self):
@@ -769,6 +859,52 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
             self.overlay.fade_out()
             self.load_mode()
 
+    # ------------------------------------------------------------------ trainer (coding rounds)
+    def start_trainer(self, settings: dict | None = None):
+        if settings is None:
+            from .trainer.setup_dialog import SetupDialog
+            dlg = SetupDialog(self.cfg.get("trainer") or {})
+            dlg.exec()
+            settings = dlg.result_settings
+            if not settings:
+                if self.mode is None:
+                    self.overlay.show_chooser()
+                return
+        if self.practice:
+            self.practice.stop()
+            self.practice = None
+            self.overlay.set_actions([])
+        if self.notes:   # a real call was running: save it first
+            self.notes.finalize()
+            self.notes = None
+        if self.trainer:
+            self.trainer.end()
+            self.trainer = None
+        from .trainer.session import TrainerSession
+        self.mode = "trainer"
+        self.overlay.showing_answer = False
+        self.load_mode()
+        self.trainer = TrainerSession(self, settings)
+        self._trainer_hotkeys(True)
+        keys = (self.cfg.get("trainer") or {}).get("hotkeys") or {}
+        self.overlay.show_status(f"Trainer: {keys.get('answer', 'ctrl+alt+a')} answers · {keys.get('narrate', 'ctrl+alt+n')} "
+                                 f"narrate · {keys.get('debug', 'ctrl+alt+d')} debug (Tab is free for your code)", 7000)
+        self._refresh_tray()
+
+    def end_trainer(self, show_chooser: bool = True):
+        if not self.trainer:
+            return
+        self.trainer.end()
+        self.trainer = None
+        self._trainer_hotkeys(False)
+        self.mode = None
+        self.overlay.set_actions([])
+        self.overlay.showing_answer = False
+        self.overlay.show_status("Trainer session saved (tray → Open trainer sessions)", 4000)
+        if show_chooser:
+            self.overlay.show_chooser()
+        self._refresh_tray()
+
     # ------------------------------------------------------------------ practice
     def start_practice(self, kind: str):
         if self.notes and not self.practice:  # a real call was running: save it first
@@ -844,6 +980,8 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         menu.addSeparator()
         self.mode_group = QActionGroup(menu)
         for m in self.cfg.modes:
+            if m == "trainer":
+                continue   # its own entry below: it starts with a setup dialog
             a = QAction(f"{mode_label(m)} mode", menu, checkable=True)
             a.triggered.connect(lambda _=False, m=m: self._set_mode(m))
             self.mode_group.addAction(a)
@@ -865,6 +1003,7 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         menu.addAction("Add documents…", self.pick_documents)
         menu.addAction("Add a quick note…", self._quick_note)
         menu.addAction("Practice answering…", lambda: self._set_mode("practice"))
+        menu.addAction("Trainer: coding round…", lambda: self._set_mode("trainer"))
         menu.addAction("Set up my voice…", self.start_voice_setup)
         voices_menu = menu.addMenu("Saved voices")
         voices_menu.aboutToShow.connect(lambda m=voices_menu: self._fill_voices_menu(m))
@@ -875,6 +1014,8 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
             menu.addAction("Prep SBIR call…", self.build_sbir_prep)
         menu.addAction("Open meeting notes folder", lambda: os.startfile(ROOT / "meetings")
                        if (ROOT / "meetings").exists() else self.overlay.show_status("No meeting notes yet", 2000))
+        menu.addAction("Open trainer sessions", lambda: os.startfile(ROOT / "trainer")
+                       if (ROOT / "trainer").exists() else self.overlay.show_status("No trainer sessions yet", 2000))
         menu.addAction("Open profiles folder", lambda: os.startfile(resolve("profiles")))
         menu.addAction("Open app log", lambda: os.startfile(ROOT / "data" / "logs"))
         menu.addAction("Edit config", lambda: os.startfile(ROOT / "config.yaml"))
@@ -1060,6 +1201,8 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
     def shutdown(self):
         """Save everything. Safe to call from any thread and more than once (red dot, tray,
         hotkey, or the console window being closed)."""
+        if self.trainer:
+            self.trainer.save_quietly()
         if self.notes:
             self.notes.finalize()
         try:
@@ -1081,6 +1224,8 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         log.info("quitting")
         if self.practice:
             self.practice.stop()
+        if self.trainer:
+            self.trainer.end()
         self.shutdown()
         for s in getattr(self, "segs", []):
             s.stop()

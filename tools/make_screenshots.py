@@ -143,6 +143,138 @@ def main():
     compose(panel, "6-transcript")
     panel._set_tab("notes")
     compose(panel, "7-notes")
+    panel.toggle_expanded()
+
+    trainer_shots(cfg, panel)
+
+
+# ---------------------------------------------------------------------------- trainer mode
+
+TRAINER_ANSWERS = [
+    ("TRAINER · auto · 14:21:08",
+     "Q: What's the time complexity of this?\nAbout: Complexity\n"
+     "> Right now it's O(n²): for every number I check every number after it. Space is O(1).\n"
+     "- With a hash map of what I've seen it drops to one pass, O(n)"),
+    ("TRAINER · narrate · 14:19:40",
+     "Q: Starting to code\nAbout: Coding\n"
+     "> I'll start with the simple version, two loops over every pair, and get it passing first."),
+]
+
+
+def trainer_shots(cfg, panel: Overlay):
+    """Trainer mode on the replayed Two Sum round in tools/trainer_demo_state.json (a scripted
+    interview, run through the real pipeline: requirements, design, verified tests, debug)."""
+    import json
+    import time
+
+    from cue.trainer import views
+    from cue.trainer.state import ProblemState
+    from cue.trainer.windows import AnswersWindow, TrainerWindow
+
+    state = ProblemState.from_dict(json.loads((ROOT / "tools" / "trainer_demo_state.json").read_text(encoding="utf-8")))
+    state.estimate.started_at = time.time() - (state.estimate.minutes * 60 - 7 * 60 - 42)   # 7:42 left
+    ov = config.Cfg(dict(cfg["overlay"], acrylic=False, hide_from_screen_share=False, tint_alpha=175))
+    fs = int(ov.font_size * 0.9)
+
+    panel.set_mode("trainer", "auto")
+    panel.set_base_title("Listening · claude")
+    panel.showing_answer = False   # the spec board is the panel's home in a coding round
+    panel.set_actions([])
+    QApplication.processEvents()   # let the earlier screenshots' buttons actually go away
+    panel.set_home(views.spec_header(state), views.spec_html(state, panel.fs))
+    panel.set_actions([(label, lambda: None) for label in
+                       ("📋 Paste problem", "⏸ Pause", "+5 min", "▶ Tests", "⚡ Debug", "✕ End")])
+    QApplication.processEvents()
+    panel._relayout()
+    QApplication.processEvents()
+    panel._relayout()
+
+    def window(key, title, size, html, tabs=(), active="", tools=()):
+        w = TrainerWindow(ov, key, title, size)
+        for t in tabs:
+            b = w.add_header_button(t, "", lambda: None, checkable=True)
+            b.setChecked(t == active)
+        if tools:
+            w.set_tools([(t, "", lambda: None) for t in tools])
+        w.resize(*size)
+        w.move(-4000, -4000)
+        w.show()
+        w.set_html(html, keep_scroll=False)
+        QApplication.processEvents()
+        return w
+
+    answers = AnswersWindow(ov)
+    answers.resize(440, 330)
+    answers.move(-4000, -4000)
+    answers.show()
+    for status, text in reversed(TRAINER_ANSWERS):
+        answers.show_answer(status, text, new=True)
+    howto = window("howto", "HOW TO SOLVE IT", (440, 640), views.walkthrough_html(state, fs))
+    ask = window("ask", "ASK NEXT", (440, 300), views.questions_html(state, fs, now=time.time() + 60))
+    design = window("design", "DESIGN TRACKS", (560, 640), views.design_html(state, fs))
+    design.set_status("O(n)")
+    tabs = ("Blocks", "My code", "Tests", "Debug")
+    lexer = "python"
+    code = window("code", "CODE · PYTHON", (560, 420), views.mycode_html(state, fs, lexer), tabs, "My code",
+                  ("▶ Run tests", "⚡ Debug", "Open file"))
+    code.set_status("9/11 ✓")
+    tests = window("tests", "CODE · PYTHON", (560, 520), views.tests_html(state, fs), tabs, "Tests",
+                   ("▶ Run all", "+ Add test", "Auto-run: on"))
+    tests.set_status("9/11 ✓")
+    debug = window("debug", "CODE · PYTHON", (560, 640), views.debug_html(state, fs, lexer, show_trace=True), tabs, "Debug",
+                   ("⚡ Debug now",))
+    QApplication.processEvents()
+
+    # the whole layout: Answers / How to solve it on the left, the spec board in the middle, Code on the right
+    gap, pad = 26, 60
+    shots = {k: w.grab() for k, w in (("answers", answers), ("howto", howto), ("ask", ask), ("code", code),
+                                      ("design", design))}
+    spec = panel.grab()
+    left_h = shots["answers"].height() + gap + shots["howto"].height()
+    mid_h = spec.height() + gap + shots["ask"].height()
+    right_h = shots["code"].height() + gap + shots["design"].height()
+    w = pad * 2 + 440 + gap + spec.width() + gap + 560
+    h = pad * 2 + max(left_h, mid_h, right_h)
+    img = backdrop(w, h)
+    p = QPainter(img)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    def put(pix, x, y):
+        for i in range(18, 0, -2):
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(x - i, y - i + 10, pix.width() + 2 * i, pix.height() + 2 * i), 14 + i, 14 + i)
+            p.fillPath(path, QColor(0, 0, 0, 7))
+        p.drawPixmap(QPoint(x, y), pix)
+    x0, x1, x2 = pad, pad + 440 + gap, pad + 440 + gap + spec.width() + gap
+    put(shots["answers"], x0, pad)
+    put(shots["howto"], x0, pad + shots["answers"].height() + gap)
+    put(spec, x1, pad)
+    put(shots["ask"], x1 + (spec.width() - 440) // 2, pad + spec.height() + gap)
+    put(shots["code"], x2, pad)
+    put(shots["design"], x2, pad + shots["code"].height() + gap)
+    p.end()
+    img.save(str(OUT / "8-trainer.png"))
+    print("wrote 8-trainer")
+
+    compose(panel, "9-trainer-spec")
+    for name, w in (("10-trainer-howto", howto), ("11-trainer-design", design), ("12-trainer-code", code),
+                    ("13-trainer-tests", tests), ("14-trainer-debug", debug)):
+        compose_widget(w, name)
+
+
+def compose_widget(widget, name: str, pad: int = 60):
+    shot = widget.grab()
+    img = backdrop(shot.width() + pad * 2, shot.height() + pad * 2)
+    p = QPainter(img)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    for i in range(18, 0, -2):
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(pad - i, pad - i + 10, shot.width() + 2 * i, shot.height() + 2 * i), 14 + i, 14 + i)
+        p.fillPath(path, QColor(0, 0, 0, 7))
+    p.drawPixmap(QPoint(pad, pad), shot)
+    p.end()
+    img.save(str(OUT / f"{name}.png"))
+    print("wrote", name)
 
 
 if __name__ == "__main__":

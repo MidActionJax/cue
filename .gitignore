@@ -6,8 +6,9 @@ dist/
 # Everything below is personal: created on your machine, never committed.
 # transcripts, logs, models, caches
 data/
-# your call notes
+# your call notes and trainer session records
 meetings/
+/trainer/
 # your settings (template: config.example.yaml)
 config.yaml
 # your profile + what Cue learned from your calls + voice fingerprints

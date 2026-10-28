@@ -1,0 +1,25 @@
+# gold: {"language": "python", "difficulty": ["medium"], "minutes": [15, 35], "optimal": "O(n)",
+#   "requirements": [["longest", "length"], ["repeat", "duplicate", "distinct", "unique"], ["contiguous", "substring"], ["empty"]],
+#   "not_live": [],
+#   "asked": [["characters", "ascii", "letters", "character set"], ["empty"]],
+#   "hint": ["window", "sliding"]}
+# solution:
+#   def length_of_longest_substring(s):
+#       last, start, best = {}, 0, 0
+#       for i, ch in enumerate(s):
+#           if ch in last and last[ch] >= start:
+#               start = last[ch] + 1
+#           last[ch] = i
+#           best = max(best, i - start + 1)
+#       return best
+INTERVIEWER: Alright, so given a string, find the length of the longest substring without repeating characters.
+INTERVIEWER: So abcabcbb, the answer is three, because abc is the longest one with no repeats.
+ME: Substring meaning contiguous, right, not a subsequence?
+INTERVIEWER: Correct, contiguous characters.
+ME: What characters can appear, just lowercase letters?
+INTERVIEWER: Could be any printable ASCII, so letters, digits, symbols and spaces.
+ME: And if the string is empty?
+INTERVIEWER: Then return zero. The string can be up to like fifty thousand characters.
+ME: Okay so brute force I could check every substring and see if it has duplicates, that's n cubed, or n squared with a set.
+INTERVIEWER: Right. Can you do better? What if you kept track of a window of characters as you go?
+ME: Oh, yeah, a sliding window where I move the left side forward when I hit a repeat.

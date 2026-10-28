@@ -35,12 +35,16 @@ datas = [
     (os.path.join(REPO, "profiles", "sbir", "README.md"), os.path.join("profiles", "sbir")),
     (os.path.join(REPO, "profiles", "docs", "README.md"), os.path.join("profiles", "docs")),
     (os.path.join(REPO, "models", "wespeaker_en_voxceleb_resnet34_LM.onnx"), "models"),
+    # trainer mode: the VS Code extension (packaged into a .vsix on demand) and the eval scripts
+    (os.path.join(REPO, "tools", "vscode-cue-trainer", "*"), os.path.join("tools", "vscode-cue-trainer")),
+    (os.path.join(REPO, "evals", "trainer", "*.txt"), os.path.join("evals", "trainer")),
 ]
 datas += collect_data_files("faster_whisper")
 
 hiddenimports = (collect_submodules("cue") + collect_submodules("worklog")
                  + ["pycaw.pycaw", "comtypes.client", "webrtcvad", "keyboard", "soxr", "pyaudiowpatch",
-                    "anthropic", "httpx", "pypdf", "yaml", "PyQt6.QtNetwork", "openpyxl"])
+                    "anthropic", "httpx", "pypdf", "yaml", "PyQt6.QtNetwork", "openpyxl"]
+                 + collect_submodules("pygments"))   # lexers are looked up by name at runtime
 
 a = Analysis(
     [os.path.join(SPECPATH, "cue_entry.py")],

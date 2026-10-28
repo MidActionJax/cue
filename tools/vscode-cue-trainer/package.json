@@ -1,0 +1,19 @@
+{
+  "name": "cue-trainer",
+  "displayName": "Cue Trainer",
+  "description": "Connects VS Code to Cue's Trainer mode: Cue sees your edits as you type (before you save) and draws its red / yellow / green line marks in the editor.",
+  "version": "0.1.0",
+  "publisher": "midactionjax",
+  "license": "MIT",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "cueTrainer.runTests", "title": "Cue Trainer: Run tests" },
+      { "command": "cueTrainer.debug", "title": "Cue Trainer: Debug (find the broken lines)" },
+      { "command": "cueTrainer.clearMarks", "title": "Cue Trainer: Clear marks" }
+    ]
+  }
+}

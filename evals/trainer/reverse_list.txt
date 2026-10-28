@@ -1,0 +1,17 @@
+# gold: {"language": "javascript", "difficulty": ["easy"], "minutes": [5, 20], "optimal": "O(n)",
+#   "requirements": [["reverse"], ["head", "new head", "return"], ["empty", "null", "no nodes"], ["in place", "o(1)", "constant", "extra space", "new list"]],
+#   "not_live": [],
+#   "asked": [["empty", "null"], ["in place", "new list", "extra", "modify"]]}
+# solution:
+#   function reverseList(head) {
+#     let prev = null;
+#     while (head) { const next = head.next; head.next = prev; prev = head; head = next; }
+#     return prev;
+#   }
+INTERVIEWER: Let's do a linked list question. Given the head of a singly linked list, reverse the list and return the new head.
+INTERVIEWER: So one, two, three, four, five becomes five, four, three, two, one.
+ME: Could the list be empty?
+INTERVIEWER: Yes, it can be empty, in that case just return null. Up to five thousand nodes.
+ME: Do you want me to build a new list or can I modify it in place?
+INTERVIEWER: Do it in place please, constant extra space.
+ME: Okay so I'll walk through with a previous pointer and flip each next pointer.

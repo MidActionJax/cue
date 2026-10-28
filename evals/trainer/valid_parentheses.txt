@@ -1,0 +1,28 @@
+# gold: {"language": "python", "difficulty": ["easy"], "minutes": [8, 20], "optimal": "O(n)",
+#   "requirements": [["valid", "balanced", "properly closed", "matched"], ["square", "curly", "brackets", "braces", "three"], ["order", "nested", "correct order"], ["empty"]],
+#   "not_live": [],
+#   "asked": [["empty"]]}
+# solution:
+#   def is_valid(s):
+#       pairs = {")": "(", "]": "[", "}": "{"}
+#       st = []
+#       for ch in s:
+#           if ch in pairs:
+#               if not st or st[-1] != pairs[ch]:
+#                   return False
+#               st.pop()
+#           else:
+#               st.append(ch)
+#       return not st
+INTERVIEWER: Alright, let's get started. This one's a string problem.
+INTERVIEWER: I'll give you a string that only has parentheses in it, open and close parens. Return true if it's valid, meaning every open paren gets closed.
+ME: So like open open close close is valid, but close open is not?
+INTERVIEWER: Exactly. The closing has to come after the opening and they have to match up.
+ME: What about an empty string, is that valid?
+INTERVIEWER: Yeah, treat the empty string as valid, return true.
+INTERVIEWER: Oh and actually, let me make it a little more interesting. The string can also have square brackets and curly braces, so three kinds of brackets.
+INTERVIEWER: And they have to close in the correct order. So open paren, open square, close paren, close square, that's not valid.
+ME: Okay, so the string only has those six characters, nothing else like letters?
+INTERVIEWER: Right, only those six characters. Length up to ten thousand.
+ME: Makes sense. I'm thinking a stack, push opens and pop when I see a close.
+INTERVIEWER: Go for it.

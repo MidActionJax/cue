@@ -11,6 +11,7 @@
     Cue.exe accent-test FILE     compare Whisper models on a recording
     Cue.exe devices              list audio devices
     Cue.exe notes rewrite <call>  write a call's final notes again (e.g. after fixing a name)
+    Cue.exe trainer-eval [NAME]  replay the scripted coding interviews and score the trainer
     Cue.exe notes finalize|recover ...   (internal: finishing a call's notes)
 
 From source the same commands are `python -m cue.cli <command> ...`.
@@ -75,6 +76,17 @@ def main() -> int:
         from .audio import list_devices
         list_devices()
         return 0
+    if cmd == "trainer-exec":
+        # internal: run a Python file in Cue's own interpreter (the trainer's test oracle, or your
+        # Python solution when Python isn't installed)
+        import runpy
+        sys.argv = list(rest)
+        sys.path.insert(0, str(APP_DIR))
+        runpy.run_path(rest[0], run_name="__main__")
+        return 0
+    if cmd == "trainer-eval":
+        from .trainer.eval import main as eval_main
+        return eval_main(rest)
     print(__doc__)
     return 2
 

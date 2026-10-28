@@ -270,8 +270,54 @@ def save_ui_state(state: dict) -> None:
         pass
 
 
-class Overlay(QWidget):
-    mode_clicked = pyqtSignal(str)      # "work" | "interview" | "sbir" | "practice"
+class GlassWindow(QWidget):
+    """Frameless, always-on-top frosted glass that never takes keyboard focus and is left out of
+    screen capture. The main panel and the trainer's windows are all one of these."""
+
+    def __init__(self, cfg, taskbar: bool | None = None):
+        self._taskbar = cfg.get("show_in_taskbar", True) if taskbar is None else taskbar
+        flags = (Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+                 | Qt.WindowType.WindowDoesNotAcceptFocus)
+        if not self._taskbar:
+            flags |= Qt.WindowType.Tool
+        super().__init__(None, flags)
+        self.cfg = cfg
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.tint = QColor(cfg.tint)
+        self.acrylic = False
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        hwnd = int(self.winId())
+        ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        # never steal focus; with show_in_taskbar Cue gets a taskbar button with its icon
+        ex |= WS_EX_NOACTIVATE
+        ex = (ex | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW if self._taskbar else ex | WS_EX_TOOLWINDOW
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
+        if self.cfg.hide_from_screen_share:
+            user32.SetWindowDisplayAffinity(wintypes.HWND(hwnd), WDA_EXCLUDEFROMCAPTURE)
+        if self.cfg.acrylic and not self.acrylic:
+            self.acrylic = _enable_acrylic(hwnd, self.tint, self.cfg.tint_alpha)
+
+    def paint_glass(self, p: QPainter) -> None:
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(r, 14, 14)
+        fill = QColor(self.tint)
+        # with acrylic the blur+tint is native, so only a light sheen is painted on top
+        fill.setAlpha(40 if self.acrylic else min(255, self.cfg.tint_alpha + 60))
+        p.fillPath(path, fill)
+        p.setPen(QPen(QColor(255, 255, 255, 45), 1))
+        p.drawPath(path)
+
+    def paintEvent(self, e):
+        self.paint_glass(QPainter(self))
+
+
+class Overlay(GlassWindow):
+    mode_clicked = pyqtSignal(str)      # "work" | "interview" | "sbir" | "practice" | "trainer"
     devices_clicked = pyqtSignal(str)   # "them" | "me"
     script_toggled = pyqtSignal(bool)
     explain_clicked = pyqtSignal()
@@ -283,18 +329,9 @@ class Overlay(QWidget):
     files_dropped = pyqtSignal(list)    # documents dragged onto the panel (local paths)
 
     def __init__(self, cfg):
-        flags = (Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
-                 | Qt.WindowType.WindowDoesNotAcceptFocus)
-        if not cfg.get("show_in_taskbar", True):
-            flags |= Qt.WindowType.Tool
-        super().__init__(None, flags)
+        super().__init__(cfg)
         self.setWindowTitle("Cue")
-        self.cfg = cfg
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAcceptDrops(True)         # drag PDFs / Word / text files onto the panel to add them
-        self.tint = QColor(cfg.tint)
-        self.acrylic = False
         self.fs = fs = cfg.font_size
         self.minimized = False
         self.expanded = False
@@ -367,14 +404,16 @@ class Overlay(QWidget):
         lay.addLayout(head)
         lay.addSpacing(4)
         row = QHBoxLayout()
-        row.setSpacing(12)
+        row.setSpacing(10)
         big = ("QPushButton{color:%s; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.14);"
-               " border-radius:12px; padding:14px; font:%dpx 'Segoe UI'; text-align:left;}"
+               " border-radius:12px; padding:12px 10px; font:%dpx 'Segoe UI'; text-align:left;}"
                "QPushButton:hover{background:rgba(143,180,255,0.22); border-color:rgba(143,180,255,0.55);}")
-        for mode, title, sub in (("work", "Work", "Team call · answers\nfrom what I did"),
-                                 ("interview", "Interview", "Every question, from\nresume && history"),
-                                 ("sbir", "SBIR", "Partner or client call\n· offer, rules, prep"),
-                                 ("practice", "Practice", "Rehearse out loud,\nget coached")):
+        # five across: keep each subtitle line short enough to fit
+        for mode, title, sub in (("work", "Work", "Team call, from\nwhat I did"),
+                                 ("interview", "Interview", "From resume\n&& history"),
+                                 ("sbir", "SBIR", "Partners &&\nclients"),
+                                 ("practice", "Practice", "Rehearse,\nget coached"),
+                                 ("trainer", "Trainer", "Coding round\npractice")):
             b = QPushButton(f"{title}\n{sub}")
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             b.setStyleSheet(big % (TEXT, int(self.fs * 0.85)))
@@ -459,20 +498,6 @@ class Overlay(QWidget):
             sb.setValue(sb.maximum())
 
     # ------------------------------------------------------------------ native window setup
-    def showEvent(self, e):
-        super().showEvent(e)
-        hwnd = int(self.winId())
-        ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-        # never steal focus; with show_in_taskbar Cue gets a taskbar button with its icon
-        ex |= WS_EX_NOACTIVATE
-        ex = (ex | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW if self.cfg.get("show_in_taskbar", True) \
-            else ex | WS_EX_TOOLWINDOW
-        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
-        if self.cfg.hide_from_screen_share:
-            user32.SetWindowDisplayAffinity(wintypes.HWND(hwnd), WDA_EXCLUDEFROMCAPTURE)
-        if self.cfg.acrylic and not self.acrylic:
-            self.acrylic = _enable_acrylic(hwnd, self.tint, self.cfg.tint_alpha)
-
     def closeEvent(self, e):
         # taskbar "Close window", Alt+F4, Windows asking the app to close: end the call properly
         e.ignore()
@@ -503,16 +528,7 @@ class Overlay(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        path = QPainterPath()
-        path.addRoundedRect(r, 14, 14)
-        fill = QColor(self.tint)
-        # with acrylic the blur+tint is native, so only a light sheen is painted on top
-        fill.setAlpha(40 if self.acrylic else min(255, self.cfg.tint_alpha + 60))
-        p.fillPath(path, fill)
-        p.setPen(QPen(QColor(255, 255, 255, 45), 1))
-        p.drawPath(path)
+        self.paint_glass(p)
         if self.body.isVisible() or self.pane.isVisible():
             p.setPen(QPen(QColor(255, 255, 255, 22), 1))
             y = self.bar.height() + 0.5
@@ -675,6 +691,7 @@ class Overlay(QWidget):
         while self._actions_lay.count():
             item = self._actions_lay.takeAt(0)
             if item.widget():
+                item.widget().hide()   # deleteLater waits for the event loop: don't show it until then
                 item.widget().deleteLater()
         for label, callback in actions:
             b = QPushButton(label)

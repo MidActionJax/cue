@@ -1,0 +1,26 @@
+# gold: {"language": "python", "difficulty": ["medium"], "minutes": [15, 35], "optimal": "O(n)",
+#   "requirements": [["product"], ["except", "all other", "other elements", "excluding"], ["division", "divide"], ["o(n)", "linear", "one pass", "time"]],
+#   "not_live": [["can use division", "division is allowed", "division allowed"]],
+#   "asked": [["zero", "zeros"]]}
+# solution:
+#   def product_except_self(nums):
+#       n = len(nums)
+#       out = [1] * n
+#       left = 1
+#       for i in range(n):
+#           out[i] = left
+#           left *= nums[i]
+#       right = 1
+#       for i in range(n - 1, -1, -1):
+#           out[i] *= right
+#           right *= nums[i]
+#       return out
+INTERVIEWER: Okay, next problem. Given an integer array, return an array where each element is the product of all the other elements.
+INTERVIEWER: So one, two, three, four gives you twenty-four, twelve, eight, six.
+ME: Can there be zeros in the array?
+INTERVIEWER: Yes, there can be zeros, and negatives.
+ME: Okay, so my first thought is multiply everything and then divide by each element, but zeros would break that.
+INTERVIEWER: Right, and actually, I don't want you to use division at all for this one.
+INTERVIEWER: And try to do it in linear time. The array has at least two elements, up to ten to the fifth.
+ME: Hmm, so I could do prefix products from the left and suffix products from the right.
+INTERVIEWER: Yeah, walk me through that.

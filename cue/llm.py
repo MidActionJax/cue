@@ -155,7 +155,7 @@ class ClaudeCLIBackend(Backend):
 
     name = "claude"
 
-    def __init__(self, model: str):
+    def __init__(self, model: str, tag: str = "live"):
         self.model = model
         self.exe = shutil.which("claude")
         self.system = ""
@@ -164,7 +164,7 @@ class ClaudeCLIBackend(Backend):
         self._active: _Session | None = None
         self._warm = threading.Event()       # first warm-up finished (ok or not): see last_error
         self.last_error: str | None = None
-        self._sp = DATA / "tmp" / "live_system_prompt.md"
+        self._sp = DATA / "tmp" / f"{tag}_system_prompt.md"   # one per backend (the trainer runs several)
 
     @staticmethod
     def available() -> bool:

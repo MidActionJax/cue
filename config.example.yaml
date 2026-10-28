@@ -49,6 +49,41 @@ modes:
     # Read last, after all the context, so a long contacts file can't push it out of attention.
     rules: profiles/sbir/rules.md
 
+  trainer:
+    # Trainer mode (coding-interview practice). Answers here are about the coding problem; this
+    # context is only for how you talk. `auto` answers every interviewer question in the Answers window.
+    trigger: auto
+    context:
+      - profiles/me.md
+      - profiles/voice.md
+
+# Trainer mode: coding-interview rounds. Pick it on the start screen (or tray → Trainer…).
+trainer:
+  language: python            # the default in the setup dialog (any language in the list)
+  folder: ""                  # where new solution files go; empty = Documents\Cue Trainer
+  editor: code                # opens your solution file; "" = don't open anything
+  timer_autostart: true       # the countdown starts as soon as the problem is clear enough to solve
+  auto_run: true              # run the tests every time you save (runnable languages)
+  models:                     # Claude models per job (claude CLI aliases)
+    default: sonnet
+    listener: sonnet          # keeps the requirements / questions board (runs a lot: haiku is lighter on usage)
+    reviewer: sonnet          # reads your code as you type
+  thinking_tokens: 6000       # the Designer, Test author and Debugger think first (their work is checked by running it)
+  listen_every_s: 4           # at most one board update per this many seconds while people talk
+  review_every_s: 8           # at most one code review per this many seconds while you type
+  test_timeout_s: 5           # per test
+  stress_timeout_s: 10        # the big-input speed test
+  memory_mb: 1024             # per test run
+  verify_count: 300           # random inputs the reference and brute force must agree on
+  shrink_budget: 60           # runs spent finding the smallest failing input when you debug
+  hotkeys:                    # Tab indents code, so trainer mode uses these instead of Tab / Shift+Tab
+    answer: ctrl+alt+a        # double-press = full script
+    explain: ctrl+alt+s
+    narrate: ctrl+alt+n       # what to say out loud right now
+    run_tests: ctrl+alt+r
+    debug: ctrl+alt+d
+    windows: ctrl+alt+w       # show / hide the trainer windows
+
 # Documents you add (tray → Add documents…, drag files onto the panel, or cue-cli docs add):
 # PDFs, Word (.docx) and text. They live in profiles/docs/ (every call) or profiles/docs/<mode>/.
 docs:

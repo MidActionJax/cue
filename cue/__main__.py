@@ -94,7 +94,14 @@ def main():
     ap.add_argument("--mode", choices=["work", "interview", "sbir"], help="skip the start-screen chooser")
     ap.add_argument("--quit", action="store_true", help="end the running Cue's call (notes saved) and exit")
     ap.add_argument("--demo-script", help=argparse.SUPPRESS)  # testing: a text file, one 'them' line per row
+    # dev/demo: replay a scripted coding interview (evals/trainer/*.txt) into trainer mode, no audio;
+    # --trainer-solve also writes the script's known-good solution into the file once it's done
+    ap.add_argument("--trainer-replay", help=argparse.SUPPRESS)
+    ap.add_argument("--trainer-lang", help=argparse.SUPPRESS)
+    ap.add_argument("--trainer-solve", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
+    if args.trainer_replay:
+        args.demo = True
 
     logs = config.DATA / "logs"
     logs.mkdir(parents=True, exist_ok=True)
@@ -136,7 +143,9 @@ def main():
     instance.message.connect(on_message)
     app.aboutToQuit.connect(ctl.shutdown)  # sign-out / shutdown: still save the call
 
-    if args.demo:
+    if args.trainer_replay:
+        _replay_trainer(ctl, args)
+    elif args.demo:
         from .audio import Utterance
         import numpy as np
 
@@ -156,6 +165,34 @@ def main():
     code = app.exec()
     logging.getLogger(__name__).info("bye")
     _hard_exit(code)
+
+
+def _replay_trainer(ctl, args) -> None:
+    """A scripted mock interview, line by line, as if it were heard on a call."""
+    from pathlib import Path
+
+    import numpy as np
+
+    from .audio import Utterance
+    from .trainer import langs
+    from .trainer.eval import parse_script
+
+    gold, solution, lines = parse_script(Path(args.trainer_replay))
+    lang = langs.get(args.trainer_lang or gold.get("language", "python"))
+    path = config.DATA / "trainer" / "replay" / time.strftime("%Y%m%d-%H%M%S") / lang.user_name(solution)
+    # open the file to code in, unless the script's own solution is going to be written into it
+    ctl.start_trainer({"language": lang.key, "path": str(path), "problem_text": "",
+                       "open_editor": not args.trainer_solve})
+
+    def inject(i=0):
+        who, text = lines[i]
+        t = time.time() - 3
+        ctl.bridge.text.emit(Utterance("them" if who == "INTERVIEWER" else "me", i, np.zeros(1), t, t + 3, True), text)
+        if i + 1 < len(lines):
+            QTimer.singleShot(2500, lambda: inject(i + 1))
+        elif args.trainer_solve and lang.key == gold.get("language", "python"):
+            QTimer.singleShot(45000, lambda: path.write_text(solution, encoding="utf-8"))
+    QTimer.singleShot(2500, inject)
 
 
 def _hard_exit(code: int) -> None:

@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.4.0-beta (2026-10-28): Trainer mode
+
+### New: Trainer mode, for coding-interview rounds
+- **Trainer** on the start screen (or tray → *Trainer: coding round…*). Pick a language from every
+  common one; ▶ marks those whose tests run on this PC (Python, JavaScript/TypeScript, Java, C/C++, C#,
+  Go, Rust, Kotlin, Swift, Ruby, PHP and more). Then pick a solution file; Cue opens it in VS Code.
+- **Spec board** on the main panel. Requirements are edited in place as the interviewer refines
+  them, never rebuilt. Each one keeps the quote it came from, and unconfirmed ones are marked
+  *assumed* and become a question to ask. The board also shows the signature, examples, a
+  **countdown** sized to the problem, and pacing nudges ("time to start coding").
+- **How to solve it**: the best approach as verbal pseudocode. The steps the way you'd say them
+  out loud, walked through the interviewer's example with real numbers, plus the edge cases and
+  why it works.
+- **Ask next**: clarifying questions specific to the problem. They tick off when you ask them,
+  the answers show underneath, and questions that no longer apply drop away.
+- **Design tracks**: the plan as a flow, then brute force → optimal with time/space, why the slower
+  ones lose (operation counts at the real input size), and a line to say out loud. Interviewer
+  hints are flagged on the approach they point to. The complexity is *measured* on your code.
+- **Code**:
+  - *Blocks* is the solution split into setup / edge cases / core loop / return, in pseudocode or your language.
+  - *My code* is your file live. Red marks are proven broken (a real compiler error or a failing
+    test), yellow are suspect, green are right. Requirements and blocks tick off as you write them.
+  - *Tests* shows expected vs. actual, plus a full-size speed test.
+- **Tests you can trust**: expected outputs come from running code, not from a model's
+  arithmetic. A reference solution and a separate brute force must agree on hundreds of random
+  inputs before their outputs are used. Tests rerun every time you save.
+- **Debug** (`Ctrl+Alt+D`): runs everything, shrinks the first failure to the smallest input that
+  still fails, traces it line by line with the variables (Python), and names the exact lines with
+  the fix and a sentence to say while fixing it.
+- **Answers** window: the interviewer's questions answered about *this* problem and *your* code
+  (`Ctrl+Alt+A`, twice = script). `Ctrl+Alt+N` gives what to narrate right now. `Tab` stays free for
+  indenting during a round.
+- **VS Code helper** (optional, installed from the setup window): Cue sees your edits before you
+  save, and its marks show up inside the editor.
+- Each session is saved to `trainer/` in your data folder (requirements, questions, approaches,
+  results, your code). Practice never reaches the work brief.
+- `cue-cli trainer-eval` replays scripted mock interviews (`evals/trainer/`) and scores the whole
+  pipeline: requirements, retractions, questions, difficulty and estimate, the recommended approach,
+  whether the tests are cross-checked, and whether a known-good solution and the reference code
+  pass every generated test. On the 6 scripts it starts at **60.25 / 61** in Python. In C++ and Rust,
+  where the model writes the test driver, the reference code passed every generated test.
+- C and C++ installed with winget (WinLibs GCC) are found without any PATH changes.
+
+### Also
+- The start screen fits five modes; the README has new screenshots for every trainer window.
+
 ## 0.3.0-beta (2026-10-28): smarter answers
 
 ### Answers

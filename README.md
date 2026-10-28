@@ -16,7 +16,8 @@ opening line you can say out loud, plus the specifics that make you sound prepar
 specifics because it reads **what you actually worked on**, rebuilt every morning from your Claude
 Code and Claude Cowork history, git commits and past call notes.
 
-It's for anyone who knows their stuff but freezes when it's their turn to talk.
+It's for anyone who knows their stuff but freezes when it's their turn to talk. And with
+[**Trainer mode**](#trainer-mode-coding-interview-practice), for practicing coding-interview rounds.
 
 <p align="center">
   <img src="assets/screenshots/3-answer.png" alt="Cue answering a question in under a second" width="820">
@@ -37,6 +38,7 @@ It's for anyone who knows their stuff but freezes when it's their turn to talk.
 | 📄 **Answers from your documents** | Add PDFs, Word files or text (tray → *Add documents…*, or drag them onto the panel): a solicitation, a paper, a project plan. When you're asked about something in them, the talking points use the document's real figures and wording. Big documents are searched, so only the passages that match the question go along. |
 | 🤝 **SBIR mode** | For consulting calls with SBIR program managers and founders: answers from your offer, proof and FAQ, a per-contact prep sheet built from your tracker spreadsheets, and a rules file it never breaks (no invented prices, clients or endorsements). |
 | 🎯 **Practice mode** | It asks likely questions out loud, you answer out loud, and it coaches you with what worked, what to add, and a tighter version in your own words. |
+| 🧑‍💻 **Trainer mode** | For coding-round practice. It keeps the problem's requirements and the questions to ask up to date as the interviewer talks, starts a countdown, and lays out brute-force-to-optimal approaches. It writes tests whose expected outputs come from running two independent solutions against each other, and watches your file in VS Code. A debug key shrinks a failing test to the smallest failing input, traces it, and points at the broken line. |
 
 <table>
   <tr>
@@ -51,6 +53,83 @@ It's for anyone who knows their stuff but freezes when it's their turn to talk.
 
 The panel is frosted glass, floats above everything, **never takes keyboard focus** (clicking it
 won't pull you out of Teams or Zoom), and is **invisible to screen sharing**.
+
+---
+
+## Trainer mode: coding-interview practice
+
+Never done a coding round? Trainer mode is for practicing them: a mock interview with a friend,
+a mock-interview site, or a recorded interview played on your PC. Cue listens to the interviewer,
+works out exactly what's being asked, and lays out everything around your editor: the spec, the
+questions to ask, the plan in plain words, the approaches from brute force to optimal, and tests
+that check your code every time you save.
+
+<p align="center">
+  <img src="assets/screenshots/8-trainer.png" alt="Trainer mode: answers and the plan in plain words on the left, the spec board in the middle, your code and the design on the right" width="100%">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/9-trainer-spec.png" alt="Spec board"><br><sub><b>Spec board</b> (the main panel): requirements edited in place as the interviewer refines them, each with the quote it came from. Plus the signature, the examples, a countdown sized to the problem, and pacing nudges.</sub></td>
+    <td width="50%"><img src="assets/screenshots/10-trainer-howto.png" alt="How to solve it"><br><sub><b>How to solve it</b>: the best approach as verbal pseudocode, the steps the way you'd say them out loud, walked through the interviewer's example.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/11-trainer-design.png" alt="Design tracks"><br><sub><b>Design tracks</b>: brute force → optimal, with time/space, why the slow ones lose at the real input size, and a line to say out loud. It also shows which one your code is following.</sub></td>
+    <td width="50%"><img src="assets/screenshots/12-trainer-code.png" alt="Your code, live"><br><sub><b>My code</b>: your file, live. Red means proven broken (a failing test or a real error), yellow means suspect, green means right. Requirements tick off as you write them.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/13-trainer-tests.png" alt="Tests"><br><sub><b>Tests</b>: the interviewer's examples, edge cases, random inputs and a full-size speed test. Expected outputs are cross-checked by running two independent solutions, never guessed.</sub></td>
+    <td width="50%"><img src="assets/screenshots/14-trainer-debug.png" alt="Debug"><br><sub><b>Debug</b> (<code>Ctrl+Alt+D</code>): the smallest input that still fails, a line-by-line trace, the exact broken line, the fix, and what to say while you fix it.</sub></td>
+  </tr>
+</table>
+
+**How a round goes**
+
+1. **Trainer** on the start screen → pick the language and a solution file → **Start**. Cue
+   creates the file and opens it in VS Code. ▶ in the language list means tests can run on this
+   PC; any other language still gets everything except running the tests.
+2. The interviewer explains the problem. The **spec board** fills in and **Ask next** lists the
+   clarifying questions worth asking; they tick off as you ask them. Got the problem as text?
+   **📋 Paste problem**.
+3. Once the problem is clear the **countdown** starts. A few seconds later you get the plan in
+   **How to solve it**, the approaches in **Design tracks**, and the reference solution in
+   **Code → Blocks**. Cross-checked tests usually follow within a minute.
+4. You code. Every save reruns the tests and marks your lines. The interviewer's questions get
+   answered about *your* code in **Answers**.
+
+| Key | |
+|---|---|
+| `Ctrl+Alt+A` | answer the interviewer's latest question (twice = word-for-word script) |
+| `Ctrl+Alt+N` | what to say out loud right now, to show how you're thinking |
+| `Ctrl+Alt+R` · `Ctrl+Alt+D` | run the tests · debug the first failure |
+| `Ctrl+Alt+S` · `Ctrl+Alt+W` | what did they just say? · show/hide the trainer windows |
+
+`Tab` stays free for indenting during a round.
+
+```mermaid
+flowchart LR
+    I[Interviewer<br/>or pasted problem] --> L[Listener<br/>small edits to the spec]
+    L --> S[Spec board +<br/>Ask next]
+    L -- problem is clear --> D[Designer<br/>plan · approaches · blocks]
+    L -- problem is clear --> T[Test author<br/>reference + brute force]
+    T --> O{Do they agree on<br/>300 random inputs?}
+    O -- yes --> X[Tests with<br/>trusted answers]
+    F[Your file<br/>VS Code] --> R[Run tests on save]
+    X --> R
+    R --> M[Marks + Reviewer]
+    R -- Ctrl+Alt+D --> G[Shrink → trace → exact line]
+```
+
+- **Every window reads one shared picture of the problem.** The answers can't drift to a
+  different problem than the design, and they see the code you actually wrote.
+- **Red means proven.** A line turns red only when a test fails or a real compiler or runtime
+  error points at it. Model hunches are yellow.
+- **The optional VS Code helper** (setup window → *Install VS Code helper*) shows Cue your edits
+  before you save and draws the marks inside the editor.
+- **Each session is saved** to `trainer/` in your data folder: the problem, requirements, questions
+  and answers, approaches, results and your code. Practice never touches your work brief.
+- **`cue-cli trainer-eval`** replays scripted mock interviews and scores the whole pipeline, including
+  whether a known-good solution passes every generated test.
 
 ---
 
@@ -156,7 +235,7 @@ the **Them** light should turn green (click it to pick your call's audio device)
 
 <img src="assets/screenshots/1-start.png" alt="Start screen" width="620" align="right">
 
-1. Open Cue → **Work**, **Interview**, **SBIR** or **Practice**.
+1. Open Cue → **Work**, **Interview**, **SBIR**, **Practice** or **Trainer**.
 2. Asked something? **`Tab`**.
 3. Didn't understand them? **`Shift+Tab`** (What?).
 4. Call's over → the **red dot**. Notes save automatically (they save even if the window is just closed).
@@ -172,6 +251,7 @@ the **Them** light should turn green (click it to pick your call's audio device)
 | **● Them ● You** | Live audio lights. Click to switch devices. Plugging in a headset mid-call is handled automatically |
 | 🔴 🟡 🟢 | End call & save · shrink to a bar · live transcript + notes |
 | `Ctrl+Alt+M / T / H / Q` | Switch mode · cycle trigger · hide/re-show · end call |
+| Trainer: `Ctrl+Alt+A / S / N / R / D / W` | Answer · What? · narrate · run tests · debug · show/hide the trainer windows |
 
 `Tab` still types a Tab in whatever app you're in; Alt+Tab and Ctrl+Tab don't trigger it.
 
@@ -186,6 +266,8 @@ speech through the slower, more accurate `large-v3` model.
 **Interviews.** Drop your resume and the job description (`job.md`) into `profiles/interview/`
 and run `cue-cli prep` (`prep.cmd` from source). You get a 30-second intro, likely questions with talking points in your
 voice, STAR stories from your real history, and questions to ask them. Practice mode quizzes you on them.
+
+**Coding rounds.** Pick **Trainer** on the start screen. See [Trainer mode](#trainer-mode-coding-interview-practice).
 
 **Documents.** Tray → **Add documents…** or drag files onto the panel, then pick which calls
 they're for (all, or only Work / Interview / SBIR). PDFs, Word (.docx), text and markdown work;
@@ -241,6 +323,8 @@ Everything lives in `config.yaml`, and every option is commented. The usual knob
 | `stt.min_rms` | `0.004` | raise if keyboard or fan noise gets transcribed |
 | `overlay.width`, `font_size`, `tint_alpha` | `760`, `16`, `150` | panel look |
 | `notes.learn` | `true` | learn your voice from each call |
+| `trainer.models.listener` | `sonnet` | `haiku` keeps the live requirements board lighter on usage |
+| `trainer.auto_run` | `true` | run the tests every time you save |
 
 <details>
 <summary><b>Troubleshooting</b></summary>
@@ -262,6 +346,8 @@ Everything lives in `config.yaml`, and every option is commented. The usual knob
 ## Roadmap
 
 - [x] **Windows installer**: a compiled app, no Python needed
+- [x] **Trainer mode**: coding-interview practice with a live spec, verified tests and debugging
+- [ ] Trainer: a practice partner that plays the interviewer, with hints and a scorecard
 - [ ] First-run setup inside the app (name, teammates, workstreams) instead of editing files
 - [ ] Code-signed builds and auto-update
 - [ ] Settings window (devices, names, triggers) instead of editing YAML
@@ -276,6 +362,10 @@ Everything lives in `config.yaml`, and every option is commented. The usual knob
 
 ```
 cue/          the app: audio, speech-to-text, speakers, triggers, LLM backends, panel, notes, practice
+cue/trainer/  trainer mode: problem state, model roles, test oracle, runner, windows, eval
+tools/vscode-cue-trainer/   the VS Code helper extension
+evals/trainer/  scripted mock interviews with gold answers (cue-cli trainer-eval)
+tests/        pytest (python -m pytest tests)
 worklog/      the daily job: chat history + git + notes → daily notes → weekly → brief (+ fact-check) → history
 profiles/     your context (templates ship as *.example.md; your copies stay private)
 assets/       logo, icon, splash, installer art, screenshots (tools/ regenerates them)

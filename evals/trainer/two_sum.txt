@@ -1,0 +1,25 @@
+# gold: {"language": "python", "difficulty": ["easy"], "minutes": [8, 20], "optimal": "O(n)",
+#   "requirements": [["indices", "index", "positions"], ["target", "sum", "add up"], ["same element", "twice", "same index", "distinct", "different"], ["exactly one", "one solution", "always"]],
+#   "not_live": [["return the values", "return the numbers themselves", "return the two numbers"]],
+#   "asked": [["twice", "same element"], ["exactly one", "always a solution", "no solution", "one solution"]]}
+# solution:
+#   def two_sum(nums, target):
+#       seen = {}
+#       for i, x in enumerate(nums):
+#           if target - x in seen:
+#               return [seen[target - x], i]
+#           seen[x] = i
+INTERVIEWER: Hey, thanks for joining. How's your day going so far?
+ME: Pretty good, thanks. Excited to do this.
+INTERVIEWER: Great. So today we'll do one coding problem, and feel free to ask questions along the way.
+INTERVIEWER: You're given an array of integers and a target number. I want you to find two numbers in the array that add up to the target and return them.
+ME: Okay. When you say return them, do you want the numbers themselves or where they are?
+INTERVIEWER: Ah good question, actually return the indices, the positions of the two numbers, not the values.
+INTERVIEWER: So for example if the array is 2, 7, 11, 15 and the target is 9, you'd return 0 and 1, because 2 plus 7 is 9.
+ME: Got it. Can I use the same element twice? Like if the target is 4 and there's a 2?
+INTERVIEWER: No, they have to be two different elements. Different indices.
+ME: And is there always exactly one solution, or could there be none?
+INTERVIEWER: You can assume there's exactly one valid answer. And the array can be up to about ten to the fourth elements, values can be negative.
+INTERVIEWER: Another example, 3, 2, 4 with target 6 gives you 1 and 2.
+ME: Okay so the brute force would be checking every pair, that's n squared. I think I can do better with a hash map.
+INTERVIEWER: Sounds good, go ahead and code that up.

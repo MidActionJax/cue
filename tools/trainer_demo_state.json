@@ -1,0 +1,1011 @@
+{
+ "phase": "testing",
+ "problem": {
+  "title": "Two Sum",
+  "summary": "Find two numbers in an array that add up to a target",
+  "style": "function",
+  "signature": {
+   "name": "two_sum",
+   "params": [
+    [
+     "nums",
+     "int[]"
+    ],
+    [
+     "target",
+     "int"
+    ]
+   ],
+   "returns": "int[]"
+  },
+  "examples": [
+   {
+    "input": [
+     [
+      2,
+      7,
+      11,
+      15
+     ],
+     9
+    ],
+    "output": [
+     0,
+     1
+    ],
+    "source": "if the array is 2, 7, 11, 15 and the target is 9, you'd return 0 and 1",
+    "explanation": ""
+   },
+   {
+    "input": [
+     [
+      3,
+      2,
+      4
+     ],
+     6
+    ],
+    "output": [
+     1,
+     2
+    ],
+    "source": "3, 2, 4 with target 6 gives you 1 and 2",
+    "explanation": ""
+   }
+  ],
+  "pattern": [],
+  "difficulty": "",
+  "n_max": 10000,
+  "defined": true,
+  "confidence": 0.9
+ },
+ "requirements": [
+  {
+   "id": "R1",
+   "text": "Return indices of two different elements that sum to target",
+   "kind": "functional",
+   "status": "stated",
+   "met": "no",
+   "source": "they have to be two different elements. Different indices.",
+   "history": [
+    {
+     "text": "Find two different elements that sum to target",
+     "at": 1793220814.784826
+    },
+    {
+     "text": "Return the indices of two different elements that sum to target",
+     "at": 1793220828.6312408
+    }
+   ],
+   "changed_at": 1793220828.6312408
+  },
+  {
+   "id": "R2",
+   "text": "Exactly one valid answer exists",
+   "kind": "constraint",
+   "status": "stated",
+   "met": "yes",
+   "source": "You can assume there's exactly one valid answer",
+   "history": [],
+   "changed_at": 1793220828.6312408
+  },
+  {
+   "id": "R3",
+   "text": "Array can have up to ~10^4 elements",
+   "kind": "constraint",
+   "status": "stated",
+   "met": "partial",
+   "source": "array can be up to about ten to the fourth elements",
+   "history": [],
+   "changed_at": 1793220828.6312408
+  },
+  {
+   "id": "R4",
+   "text": "Values can be negative",
+   "kind": "constraint",
+   "status": "stated",
+   "met": "yes",
+   "source": "values can be negative",
+   "history": [],
+   "changed_at": 1793220828.6312408
+  }
+ ],
+ "questions": [
+  {
+   "id": "Q1",
+   "text": "Should I return the values or the indices of the two numbers?",
+   "why": "changes the return type and signature",
+   "status": "answered",
+   "answer": "Return the indices, not the values",
+   "priority": 1,
+   "changed_at": 1793220814.784826
+  },
+  {
+   "id": "Q2",
+   "text": "Can there be duplicate values or multiple valid pairs?",
+   "why": "affects whether we need to handle multiple answers",
+   "status": "dropped",
+   "answer": "",
+   "priority": 1,
+   "changed_at": 1793220828.6312408
+  },
+  {
+   "id": "Q3",
+   "text": "What should be returned if no pair sums to the target?",
+   "why": "determines error/edge case handling",
+   "status": "answered",
+   "answer": "Assume exactly one valid answer exists",
+   "priority": 2,
+   "changed_at": 1793220828.6312408
+  },
+  {
+   "id": "Q4",
+   "text": "Can I use the same element twice?",
+   "why": "",
+   "status": "answered",
+   "answer": "No, must be two different elements/indices",
+   "priority": 2,
+   "changed_at": 1793220828.6312408
+  }
+ ],
+ "hints": [],
+ "follow_ups": [],
+ "estimate": {
+  "minutes": 12,
+  "rationale": "classic easy, one pass with a hash map",
+  "started_at": 1793220828.632241,
+  "paused_left": -1.0,
+  "extra_s": 0.0
+ },
+ "plan": [
+  {
+   "step": "Create an empty hash map to store value -> index seen so far",
+   "detail": "dict seen = {}",
+   "branch": ""
+  },
+  {
+   "step": "Iterate through nums with index i and value num",
+   "detail": "single for loop",
+   "branch": "or: sort + two pointers (loses original indices, needs extra bookkeeping)"
+  },
+  {
+   "step": "Compute complement = target - num",
+   "detail": "check if complement already in seen",
+   "branch": ""
+  },
+  {
+   "step": "If complement in seen, return [seen[complement], i]",
+   "detail": "found the pair",
+   "branch": ""
+  },
+  {
+   "step": "Otherwise store seen[num] = i and continue",
+   "detail": "update map for future lookups",
+   "branch": ""
+  }
+ ],
+ "approaches": [
+  {
+   "id": "A1",
+   "name": "Brute force: check every pair",
+   "time": "O(n\u00b2)",
+   "space": "O(1)",
+   "idea": "Check every pair of indices to see if they sum to target.",
+   "pseudocode": "for i in range(n):\n  for j in range(i+1, n):\n    if nums[i]+nums[j]==target: return [i,j]",
+   "why_not": "At n=10,000 that's ~5\u00b710\u2077 pair checks \u2014 noticeably slower (tens to hundreds of ms, and scales quadratically) versus ~10,000 O(1) hash lookups for the optimal approach; also more code and nested loops to reason about.",
+   "tradeoffs": "Simple and no extra memory, but too slow if n grows.",
+   "say_it": "The naive approach is to check every pair of elements with nested loops, which is O(n\u00b2) and fine for tiny inputs but too slow at n=10,000.",
+   "ops": 50000000.0,
+   "recommended": false,
+   "chosen": false
+  },
+  {
+   "id": "A2",
+   "name": "Sort + two pointers",
+   "time": "O(n log n)",
+   "space": "O(n)",
+   "idea": "Sort (value, original index) pairs, then use two pointers from both ends to find the target sum.",
+   "pseudocode": "pairs = sorted((v,i) for i,v in enumerate(nums))\nlo,hi=0,n-1\nwhile lo<hi:\n  s=pairs[lo][0]+pairs[hi][0]\n  if s==target: return indices\n  elif s<target: lo+=1\n  else: hi-=1",
+   "why_not": "Requires an extra O(n) array of (value,index) pairs and an O(n log n) sort (~10,000\u00b7log2(10,000)\u2248130,000 comparisons) just to then do a linear scan \u2014 strictly more work and more code than one hash-map pass with O(n) time and simpler logic.",
+   "tradeoffs": "Avoids hash map, but adds sorting overhead and index-tracking complexity.",
+   "say_it": "Another option is to sort value-index pairs and use two pointers converging toward the target, but that costs an unnecessary O(n log n) sort when a single hash-map pass does it in O(n).",
+   "ops": 130000.0,
+   "recommended": false,
+   "chosen": false
+  },
+  {
+   "id": "A3",
+   "name": "One-pass hash map",
+   "time": "O(n)",
+   "space": "O(n)",
+   "idea": "Walk the array once, and for each number check if its complement (target - num) was already seen; if so, return both indices.",
+   "pseudocode": "seen = {}\nfor i, num in enumerate(nums):\n  comp = target - num\n  if comp in seen: return [seen[comp], i]\n  seen[num] = i",
+   "why_not": "",
+   "tradeoffs": "Uses O(n) extra space for the map, but gives optimal O(n) time with simple, clean code.",
+   "say_it": "I'll do a single pass with a hash map from value to index: for each number I check if its complement is already in the map, and if so I immediately have my answer \u2014 this is O(n) time and O(n) space.",
+   "ops": 10000.0,
+   "recommended": true,
+   "chosen": false
+  }
+ ],
+ "blocks": [
+  {
+   "id": "B1",
+   "name": "Setup",
+   "purpose": "Define function signature, no extra imports needed",
+   "pseudo": "def two_sum(nums, target):",
+   "code": "def two_sum(nums: list[int], target: int) -> list[int]:",
+   "status": "done",
+   "lines": [],
+   "note": ""
+  },
+  {
+   "id": "B2",
+   "name": "Initialize seen map",
+   "purpose": "Hash map to remember value -> index of elements already visited",
+   "pseudo": "seen = {}",
+   "code": "    seen = {}",
+   "status": "todo",
+   "lines": [],
+   "note": ""
+  },
+  {
+   "id": "B3",
+   "name": "Core loop with complement lookup",
+   "purpose": "For each element, check if its complement was already seen; if so, pair found",
+   "pseudo": "for i, num in enumerate(nums):\n  comp = target - num\n  if comp in seen: return [seen[comp], i]\n  seen[num] = i",
+   "code": "    for i, num in enumerate(nums):\n        complement = target - num\n        if complement in seen:\n            return [seen[complement], i]\n        seen[num] = i",
+   "status": "todo",
+   "lines": [],
+   "note": ""
+  },
+  {
+   "id": "B4",
+   "name": "Fallback return",
+   "purpose": "Problem guarantees a solution exists, but keep function total for safety",
+   "pseudo": "return [] (unreachable given constraints)",
+   "code": "    return []",
+   "status": "todo",
+   "lines": [],
+   "note": ""
+  }
+ ],
+ "tests": [
+  {
+   "id": "T1",
+   "name": "example 1",
+   "origin": "interviewer",
+   "input": [
+    [
+     2,
+     7,
+     11,
+     15
+    ],
+    9
+   ],
+   "expected": [
+    0,
+    1
+   ],
+   "verified": true,
+   "note": ""
+  },
+  {
+   "id": "T2",
+   "name": "example 2",
+   "origin": "interviewer",
+   "input": [
+    [
+     3,
+     2,
+     4
+    ],
+    6
+   ],
+   "expected": [
+    1,
+    2
+   ],
+   "verified": true,
+   "note": ""
+  },
+  {
+   "id": "T3",
+   "name": "smallest input",
+   "origin": "edge",
+   "input": [
+    [
+     1,
+     2
+    ],
+    3
+   ],
+   "expected": [
+    0,
+    1
+   ],
+   "verified": true,
+   "note": ""
+  },
+  {
+   "id": "T4",
+   "name": "negative values",
+   "origin": "edge",
+   "input": [
+    [
+     -5,
+     -3,
+     7,
+     2
+    ],
+    -8
+   ],
+   "expected": [
+    0,
+    1
+   ],
+   "verified": true,
+   "note": ""
+  },
+  {
+   "id": "T5",
+   "name": "duplicate values",
+   "origin": "edge",
+   "input": [
+    [
+     4,
+     4,
+     9
+    ],
+    8
+   ],
+   "expected": [
+    0,
+    1
+   ],
+   "verified": true,
+   "note": ""
+  },
+  {
+   "id": "T6",
+   "name": "zero target",
+   "origin": "edge",
+   "input": [
+    [
+     -2,
+     2,
+     5,
+     10
+    ],
+    0
+   ],
+   "expected": [
+    0,
+    1
+   ],
+   "verified": true,
+   "note": ""
+  },
+  {
+   "id": "T7",
+   "name": "large magnitude extremes",
+   "origin": "edge",
+   "input": [
+    [
+     -1000000,
+     1000000,
+     500000,
+     1
+    ],
+    0
+   ],
+   "expected": [
+    0,
+    1
+   ],
+   "verified": true,
+   "note": ""
+  },
+  {
+   "id": "T8",
+   "name": "pair not at start",
+   "origin": "edge",
+   "input": [
+    [
+     10,
+     20,
+     30,
+     40,
+     7,
+     3
+    ],
+    10
+   ],
+   "expected": [
+    4,
+    5
+   ],
+   "verified": true,
+   "note": ""
+  },
+  {
+   "id": "T9",
+   "name": "random #1",
+   "origin": "generated",
+   "input": [
+    [
+     111574,
+     -248097,
+     764776,
+     367409,
+     555640,
+     -464293,
+     770612,
+     934255,
+     976461,
+     667641,
+     447971,
+     551679
+    ],
+    306319
+   ],
+   "expected": [
+    5,
+    6
+   ],
+   "verified": true,
+   "note": ""
+  },
+  {
+   "id": "T10",
+   "name": "random #2",
+   "origin": "generated",
+   "input": [
+    [
+     295885,
+     -413883,
+     -665286,
+     597873,
+     -67112,
+     819193,
+     -849149,
+     533403,
+     -618160,
+     -144046,
+     -972498,
+     -477116,
+     671738,
+     921715,
+     -183291,
+     -545485,
+     680757,
+     -708984,
+     605842,
+     294891
+    ],
+    203641
+   ],
+   "expected": [
+    11,
+    16
+   ],
+   "verified": true,
+   "note": ""
+  },
+  {
+   "id": "T11",
+   "name": "random #3",
+   "origin": "generated",
+   "input": [
+    [
+     572434,
+     484104,
+     -952048,
+     -880461,
+     -694441,
+     229227,
+     421731,
+     477798,
+     -358137,
+     -291379,
+     -112652,
+     969250,
+     -462748,
+     -651965,
+     9188,
+     249858,
+     -337734,
+     -368005,
+     -349972,
+     -992906,
+     -446747,
+     264813,
+     714212,
+     771843,
+     -249967,
+     460498,
+     -152134,
+     716556,
+     990659,
+     8195,
+     -254775,
+     -129878,
+     -612503,
+     -304051,
+     -863393,
+     -962110,
+     -630650,
+     -861541,
+     -9016,
+     962499
+    ],
+    -242530
+   ],
+   "expected": [
+    10,
+    31
+   ],
+   "verified": true,
+   "note": ""
+  },
+  {
+   "id": "T12",
+   "name": "stress: n = 10,000",
+   "origin": "stress",
+   "input": null,
+   "expected": [
+    3300,
+    7358
+   ],
+   "verified": true,
+   "note": "checks speed: must finish within the time limit"
+  }
+ ],
+ "oracle": {
+  "module": "import random\n\ndef reference(nums, target):\n    seen = {}\n    for i, v in enumerate(nums):\n        complement = target - v\n        if complement in seen:\n            return [seen[complement], i]\n        seen[v] = i\n    return []\n\ndef brute(nums, target):\n    n = len(nums)\n    for i in range(n):\n        for j in range(i + 1, n):\n            if nums[i] + nums[j] == target:\n                return [i, j]\n    return []\n\ndef gen(n, rnd):\n    n = max(2, n)\n    val_range = 10 ** 6\n    target = rnd.randint(-val_range, val_range)\n    a = rnd.randint(-val_range, val_range)\n    b = target - a\n    nums = [a, b]\n    existing = {a, b}\n    for _ in range(2, n):\n        while True:\n            v = rnd.randint(-val_range, val_range)\n            if (target - v) not in existing:\n                break\n        nums.append(v)\n        existing.add(v)\n    idx = list(range(n))\n    rnd.shuffle(idx)\n    shuffled = [None] * n\n    for pos, val in zip(idx, nums):\n        shuffled[pos] = val\n    return [shuffled, target]\n",
+  "agreement": "308/308",
+  "verified": true,
+  "report": {
+   "disagree": 0,
+   "examples": [],
+   "errors": [],
+   "error": null
+  },
+  "has": [
+   "reference",
+   "brute",
+   "gen"
+  ]
+ },
+ "compare": "exact",
+ "code": {
+  "path": "C:/Users/you/Documents/Cue Trainer/two-sum/solution.py",
+  "language": "python",
+  "text": "def two_sum(nums, target):\n    for i in range(len(nums)):\n        for j in range(i, len(nums)):\n            if nums[i] + nums[j] == target:\n                return [i, j]\n",
+  "detected_approach": "A1",
+  "lines": {
+   "3": {
+    "mark": "red",
+    "why": "j starts at i, allowing nums[i] to be paired with itself (same index twice)",
+    "evidence": "T2 fails",
+    "text": "for j in range(i, len(nums)):"
+   },
+   "4": {
+    "mark": "red",
+    "why": "matches same index twice, e.g. nums[0]+nums[0]",
+    "evidence": "T2",
+    "text": "if nums[i] + nums[j] == target:"
+   }
+  },
+  "syntax": [],
+  "summary": "Brute force inner loop starts at i instead of i+1, causing self-pairing bugs seen in failed tests; fix range to start at i+1 or switch to hash map approach A3 for O(n)."
+ },
+ "runs": [
+  {
+   "at": 1793220884.669135,
+   "code_hash": "68b10338dae5",
+   "passed": 12,
+   "total": 12,
+   "results": [
+    {
+     "id": "T1",
+     "ms": 202,
+     "actual": [
+      0,
+      1
+     ],
+     "ok": true,
+     "expected": [
+      0,
+      1
+     ]
+    },
+    {
+     "id": "T2",
+     "ms": 201,
+     "actual": [
+      1,
+      2
+     ],
+     "ok": true,
+     "expected": [
+      1,
+      2
+     ]
+    },
+    {
+     "id": "T3",
+     "ms": 202,
+     "actual": [
+      0,
+      1
+     ],
+     "ok": true,
+     "expected": [
+      0,
+      1
+     ]
+    },
+    {
+     "id": "T4",
+     "ms": 201,
+     "actual": [
+      0,
+      1
+     ],
+     "ok": true,
+     "expected": [
+      0,
+      1
+     ]
+    },
+    {
+     "id": "T5",
+     "ms": 167,
+     "actual": [
+      0,
+      1
+     ],
+     "ok": true,
+     "expected": [
+      0,
+      1
+     ]
+    },
+    {
+     "id": "T6",
+     "ms": 169,
+     "actual": [
+      0,
+      1
+     ],
+     "ok": true,
+     "expected": [
+      0,
+      1
+     ]
+    },
+    {
+     "id": "T7",
+     "ms": 172,
+     "actual": [
+      0,
+      1
+     ],
+     "ok": true,
+     "expected": [
+      0,
+      1
+     ]
+    },
+    {
+     "id": "T8",
+     "ms": 165,
+     "actual": [
+      4,
+      5
+     ],
+     "ok": true,
+     "expected": [
+      4,
+      5
+     ]
+    },
+    {
+     "id": "T9",
+     "ms": 154,
+     "actual": [
+      5,
+      6
+     ],
+     "ok": true,
+     "expected": [
+      5,
+      6
+     ]
+    },
+    {
+     "id": "T10",
+     "ms": 160,
+     "actual": [
+      11,
+      16
+     ],
+     "ok": true,
+     "expected": [
+      11,
+      16
+     ]
+    },
+    {
+     "id": "T11",
+     "ms": 155,
+     "actual": [
+      10,
+      31
+     ],
+     "ok": true,
+     "expected": [
+      10,
+      31
+     ]
+    },
+    {
+     "id": "T12",
+     "ms": 144,
+     "actual": [
+      3300,
+      7358
+     ],
+     "ok": true
+    }
+   ],
+   "build_error": "",
+   "errors": []
+  },
+  {
+   "at": 1793220907.4029925,
+   "code_hash": "5042070664ff",
+   "passed": 9,
+   "total": 11,
+   "results": [
+    {
+     "id": "T1",
+     "ms": 207,
+     "actual": [
+      0,
+      1
+     ],
+     "ok": true,
+     "expected": [
+      0,
+      1
+     ]
+    },
+    {
+     "id": "T2",
+     "ms": 205,
+     "actual": [
+      0,
+      0
+     ],
+     "ok": false,
+     "expected": [
+      1,
+      2
+     ]
+    },
+    {
+     "id": "T3",
+     "ms": 204,
+     "actual": [
+      0,
+      1
+     ],
+     "ok": true,
+     "expected": [
+      0,
+      1
+     ]
+    },
+    {
+     "id": "T4",
+     "ms": 204,
+     "actual": [
+      0,
+      1
+     ],
+     "ok": true,
+     "expected": [
+      0,
+      1
+     ]
+    },
+    {
+     "id": "T5",
+     "ms": 176,
+     "actual": [
+      0,
+      0
+     ],
+     "ok": false,
+     "expected": [
+      0,
+      1
+     ]
+    },
+    {
+     "id": "T6",
+     "ms": 168,
+     "actual": [
+      0,
+      1
+     ],
+     "ok": true,
+     "expected": [
+      0,
+      1
+     ]
+    },
+    {
+     "id": "T7",
+     "ms": 178,
+     "actual": [
+      0,
+      1
+     ],
+     "ok": true,
+     "expected": [
+      0,
+      1
+     ]
+    },
+    {
+     "id": "T8",
+     "ms": 178,
+     "actual": [
+      4,
+      5
+     ],
+     "ok": true,
+     "expected": [
+      4,
+      5
+     ]
+    },
+    {
+     "id": "T9",
+     "ms": 153,
+     "actual": [
+      5,
+      6
+     ],
+     "ok": true,
+     "expected": [
+      5,
+      6
+     ]
+    },
+    {
+     "id": "T10",
+     "ms": 154,
+     "actual": [
+      11,
+      16
+     ],
+     "ok": true,
+     "expected": [
+      11,
+      16
+     ]
+    },
+    {
+     "id": "T11",
+     "ms": 151,
+     "actual": [
+      10,
+      31
+     ],
+     "ok": true,
+     "expected": [
+      10,
+      31
+     ]
+    }
+   ],
+   "build_error": "",
+   "errors": []
+  }
+ ],
+ "measured": {
+  "exponent": null,
+  "label": "too fast to measure (fine)",
+  "points": [
+   [
+    156,
+    163.47970021888614
+   ],
+   [
+    625,
+    154.58260010927916
+   ],
+   [
+    2500,
+    144.60140001028776
+   ],
+   [
+    10000,
+    167.280999943614
+   ]
+  ],
+  "baseline_ms": 155
+ },
+ "debug": {
+  "code_hash": "5042070664ff",
+  "run": {
+   "passed": 9,
+   "total": 11
+  },
+  "input": [
+   [
+    3,
+    1,
+    3
+   ],
+   6
+  ],
+  "expected": [
+   0,
+   2
+  ],
+  "actual": [
+   0,
+   0
+  ],
+  "trace": "  2  for i in range(len(nums)):\n       nums=[3, 1, 3], target=6\n  3  for j in range(i, len(nums)):\n       nums=[3, 1, 3], target=6, i=0\n  4  if nums[i] + nums[j] == target:\n       nums=[3, 1, 3], target=6, i=0, j=0\n  5  return [i, j]\n       nums=[3, 1, 3], target=6, i=0, j=0\n  5  return [i, j]\n       nums=[3, 1, 3], target=6, i=0, j=0 -> returns [0, 0]",
+  "summary": "The inner loop starts at j = i, so an element can pair with itself: [3, 1, 3] with target 6 returns [0, 0] instead of [0, 2].",
+  "lines": [
+   {
+    "line": 3,
+    "why": "j starts at i, allowing nums[i] to be paired with itself (same index twice)",
+    "evidence": "[3, 1, 3], 6 -> got [0, 0] (i=0, j=0), expected [0, 2]"
+   }
+  ],
+  "fix": [
+   {
+    "line": 3,
+    "before": "        for j in range(i, len(nums)):",
+    "after": "        for j in range(i + 1, len(nums)):"
+   }
+  ],
+  "say_it": "Ah, the inner loop starts at i, so 3 pairs with itself. If j starts at i plus one, every pair is two different elements."
+ },
+ "version": 13,
+ "next": {
+  "R": 5,
+  "Q": 5,
+  "T": 1
+ },
+ "walkthrough": {
+  "steps": [
+   "Go through the numbers one at a time, keeping a lookup table of every value you've already seen and its position.",
+   "For each number, work out what other number it would need to pair with to hit the target.",
+   "Check the lookup table to see if that needed number has already shown up.",
+   "If it has, you've found your pair \u2014 return the earlier position and the current position.",
+   "If it hasn't, add the current number and its position to the lookup table and move on.",
+   "Because the problem guarantees exactly one answer, you're done as soon as you find a match."
+  ],
+  "example": [
+   "Take 2, 7, 11, 15 with target 9.",
+   "At 2, I need a 7 to complete the pair; I haven't seen one, so I just remember that 2 is at position 0.",
+   "At 7, I need a 2; I have seen a 2, at position 0, so I return positions 0 and 1.",
+   "That matches the expected output of [0, 1]."
+  ],
+  "edge": [
+   "If the array has fewer than two elements, there's no valid pair, though the problem guarantees one exists so this shouldn't come up.",
+   "Negative numbers and duplicates work the same way since the lookup table is keyed by value, not sign or uniqueness of appearance."
+  ],
+  "why": "Storing each value's position as you scan turns the search for a matching complement into a constant-time lookup instead of a nested search, so the whole array is processed in a single linear pass."
+ }
+}

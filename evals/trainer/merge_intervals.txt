@@ -1,0 +1,24 @@
+# gold: {"language": "python", "difficulty": ["medium"], "minutes": [15, 35], "optimal": "O(n log n)",
+#   "requirements": [["merge", "overlap"], ["touch", "4 and 4", "share an endpoint", "end equals", "adjacent", "touching"], ["sorted", "order", "start"], ["unsorted", "any order", "not sorted", "not pre-sorted", "arbitrary"]],
+#   "not_live": [["don't merge touching", "touching intervals stay separate", "touching should not"]],
+#   "asked": [["sorted", "order"], ["touch", "endpoint", "adjacent", "4,5"]]}
+# solution:
+#   def merge(intervals):
+#       out = []
+#       for s, e in sorted(intervals):
+#           if out and s <= out[-1][1]:
+#               out[-1][1] = max(out[-1][1], e)
+#           else:
+#               out.append([s, e])
+#       return out
+INTERVIEWER: Okay, so for this one, you have a list of intervals, each one is a start and an end.
+INTERVIEWER: Merge all the overlapping intervals and return the list of merged intervals.
+INTERVIEWER: For example one comma three, two comma six, eight comma ten, fifteen eighteen becomes one six, eight ten, fifteen eighteen.
+ME: Is the input already sorted by start time?
+INTERVIEWER: No, don't assume it's sorted. It can come in any order.
+ME: And what about intervals that just touch, like one four and four five?
+INTERVIEWER: Hmm, let's say those don't count as overlapping. Actually, no, wait. Let's merge them. One four and four five becomes one five.
+ME: Okay. And should the output be in sorted order?
+INTERVIEWER: Yes, return them sorted by start. There can be up to ten to the fourth intervals.
+ME: So I'm thinking sort by start, then sweep and extend the last merged interval when the next one starts before it ends.
+INTERVIEWER: That works, what would the complexity be?
