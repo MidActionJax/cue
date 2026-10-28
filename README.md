@@ -70,16 +70,16 @@ that check your code every time you save.
 
 <table>
   <tr>
-    <td width="50%"><img src="assets/screenshots/9-trainer-spec.png" alt="Spec board"><br><sub><b>Spec board</b> (the main panel): requirements edited in place as the interviewer refines them, each with the quote it came from. Plus the signature, the examples, a countdown sized to the problem, and pacing nudges.</sub></td>
-    <td width="50%"><img src="assets/screenshots/10-trainer-howto.png" alt="How to solve it"><br><sub><b>How to solve it</b>: the best approach as verbal pseudocode, the steps the way you'd say them out loud, walked through the interviewer's example.</sub></td>
+    <td width="50%" valign="top"><img src="assets/screenshots/9-trainer-spec.png" alt="Spec board"><br><sub><b>Spec board</b> (the main panel): requirements edited in place as the interviewer refines them, each with the quote it came from. Plus the signature, the examples, a countdown sized to the problem, and pacing nudges.</sub></td>
+    <td width="50%" valign="top"><img src="assets/screenshots/10-trainer-howto.png" alt="How to solve it"><br><sub><b>How to solve it</b>: the best approach as verbal pseudocode, the steps the way you'd say them out loud, walked through the interviewer's example.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="assets/screenshots/11-trainer-design.png" alt="Design tracks"><br><sub><b>Design tracks</b>: brute force → optimal, with time/space, why the slow ones lose at the real input size, and a line to say out loud. It also shows which one your code is following.</sub></td>
-    <td width="50%"><img src="assets/screenshots/12-trainer-code.png" alt="Your code, live"><br><sub><b>My code</b>: your file, live. Red means proven broken (a failing test or a real error), yellow means suspect, green means right. Requirements tick off as you write them.</sub></td>
+    <td width="50%" valign="top"><img src="assets/screenshots/11-trainer-design.png" alt="Design tracks"><br><sub><b>Design tracks</b>: brute force → optimal, with time/space, why the slow ones lose at the real input size, and a line to say out loud. It also shows which one your code is following.</sub></td>
+    <td width="50%" valign="top"><img src="assets/screenshots/12-trainer-code.png" alt="Your code, live"><br><sub><b>My code</b>: your file, live. Red means proven broken (a failing test or a real error), yellow means suspect, green means right. Requirements tick off as you write them.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="assets/screenshots/13-trainer-tests.png" alt="Tests"><br><sub><b>Tests</b>: the interviewer's examples, edge cases, random inputs and a full-size speed test. Expected outputs are cross-checked by running two independent solutions, never guessed.</sub></td>
-    <td width="50%"><img src="assets/screenshots/14-trainer-debug.png" alt="Debug"><br><sub><b>Debug</b> (<code>Ctrl+Alt+D</code>): the smallest input that still fails, a line-by-line trace, the exact broken line, the fix, and what to say while you fix it.</sub></td>
+    <td width="50%" valign="top"><img src="assets/screenshots/13-trainer-tests.png" alt="Tests"><br><sub><b>Tests</b>: the interviewer's examples, edge cases, random inputs and a full-size speed test. Expected outputs are cross-checked by running two independent solutions, never guessed.</sub></td>
+    <td width="50%" valign="top"><img src="assets/screenshots/14-trainer-debug.png" alt="Debug"><br><sub><b>Debug</b> (<code>Ctrl+Alt+D</code>): the smallest input that still fails, a line-by-line trace, the exact broken line, the fix, and what to say while you fix it.</sub></td>
   </tr>
 </table>
 
