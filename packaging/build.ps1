@@ -15,6 +15,15 @@ $release = (& $Python -c "import cue; print(cue.__release__)").Trim()
 $version = (& $Python -c "import cue; print(cue.__version__)").Trim()
 Write-Host "Cue $release -> $Out"
 
+# stamp the version into the exe's Properties -> Details (version_info.txt follows cue/__init__.py)
+$vi = Join-Path $PSScriptRoot "version_info.txt"
+$parts = ($version.Split(".") + @("0", "0", "0"))[0..3] -join ", "
+$text = [IO.File]::ReadAllText($vi)
+$text = [regex]::Replace($text, "(filevers|prodvers)=\([^)]*\)", "`$1=($parts)")
+$text = [regex]::Replace($text, "StringStruct\('FileVersion', '[^']*'\)", "StringStruct('FileVersion', '$version')")
+$text = [regex]::Replace($text, "StringStruct\('ProductVersion', '[^']*'\)", "StringStruct('ProductVersion', '$($release.Replace('-', ' '))')")
+[IO.File]::WriteAllText($vi, $text, (New-Object Text.UTF8Encoding $false))
+
 if (-not $SkipExe) {
     & $Python -m PyInstaller packaging/cue.spec --noconfirm --workpath "$Out\build" --distpath "$Out\dist"
     if ($LASTEXITCODE) { throw "PyInstaller failed" }
