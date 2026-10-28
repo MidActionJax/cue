@@ -120,7 +120,10 @@ def _run(args) -> int:
     if args.extract_only:
         return 0
 
-    background = "\n\n".join(_read(config.resolve(p)) for p in wcfg.background_files)
+    # older configs list the shared profiles/learned.md; what's learned now lives per mode
+    files = ["profiles/work/learned.md" if str(p).replace("\\", "/") == "profiles/learned.md" else p
+             for p in wcfg.background_files]
+    background = "\n\n".join(_read(config.resolve(p)) for p in dict.fromkeys(files))
     writer = Writer(cfg.user.name, wcfg.work_projects, background, wcfg.model, wcfg.daily_model,
                     workstreams.text())
     state.setdefault("daily", {})

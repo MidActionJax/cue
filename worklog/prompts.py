@@ -82,7 +82,7 @@ Format:
 ## Decisions I made and why
 ## People — who I'm working with on what
 ## Likely questions on a call → how I'd answer
-(8–12 Q/A pairs; each answer 1–2 sentences in natural spoken first person, with specifics)
+(8–12 Q/A pairs a coworker would ask on a TEAM call, about the job workstreams only; each answer 1–2 sentences in natural spoken first person, the outcome first, a specific only where it helps)
 ## Next up
 
 DAILY NOTES:
@@ -95,7 +95,7 @@ Today is {today}. Below are {name}'s weekly work summaries (oldest first), follo
 Format:
 # {name} — Work history (auto-generated {today})
 ## Snapshot
-Who I am, what I work on, my role — 3–4 sentences.
+Who I am at work, what I work on, my role — 3–4 sentences. Job only: no job hunting, applications, internships, PhD plans or side businesses here (they belong in "Side projects (brief)", one line each, if anywhere).
 ## Projects
 ### <Project> (job projects first; for job projects, organize accomplishments and hard problems by workstream from WORKSTREAMS)
 - **What it is:** a plain-English explanation I could say on a call in 2 sentences
@@ -106,10 +106,10 @@ Who I am, what I work on, my role — 3–4 sentences.
 - **Hard problems I solved:** problem → what I did → result
 ## Skills demonstrated (each with the evidence)
 ## Interview stories (5–8, STAR: situation, task, action, result — real events only)
-## People I work with (name — role/relationship — what we work on)
-## Timeline (one line per week, most recent first)
+## People I work with (name — role/relationship — what we work on; coworkers and collaborators on the job projects only)
+## Timeline (one line per week, most recent first; job work, with side projects at most a few words at the end)
 
-Be thorough but tight; prefer specifics over adjectives.
+Be thorough but tight; prefer specifics over adjectives. A person's role comes from what the notes say about THEM; a name the call transcription attached to a stranger (e.g. an interviewer) doesn't make them a coworker.
 
 WEEKLY SUMMARIES:
 {weeks}

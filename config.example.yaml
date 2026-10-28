@@ -25,20 +25,19 @@ modes:
     # Files or folders (every .md/.txt/.pdf/.docx inside) injected as background context.
     context:
       - profiles/me.md
-      - profiles/voice.md         # learned from your calls: how you actually talk
-      - profiles/learned.md       # learned from your calls: facts, what you use/ignore
-      - profiles/interview/
+      - profiles/voice.md         # learned from your calls: how you actually talk (all modes)
+      - profiles/interview/       # incl. learned.md: facts and habits from your interviews
       - profiles/work/all_time.md
   work:
     trigger: smart
     context:
       - profiles/me.md
       - profiles/voice.md
-      - profiles/learned.md
       - profiles/work/notes.md
       - profiles/work/workstreams.md
       - profiles/work/last_week.md
       - profiles/work/all_time.md
+      - profiles/work/learned.md  # learned on team calls (each mode keeps its own)
   sbir:
     # SBIR/STTR consulting calls: referral partners (state programs, SBDCs, I-Corps hubs, firms)
     # and founders/PIs. Mostly 1-on-1, so every question gets an answer.
@@ -46,8 +45,7 @@ modes:
     context:
       - profiles/me.md
       - profiles/voice.md
-      - profiles/learned.md
-      - profiles/sbir/              # intro, offer, proof, faq, contacts, prep (see its README)
+      - profiles/sbir/              # intro, offer, proof, faq, contacts, prep, learned (see its README)
     # Read last, after all the context, so a long contacts file can't push it out of attention.
     rules: profiles/sbir/rules.md
 
@@ -115,7 +113,7 @@ llm:
   # auto -> anthropic (if ANTHROPIC_API_KEY is set) -> claude_cli (your Claude subscription)
   #      -> ollama (fully local / offline)
   backend: auto
-  claude_cli_model: haiku     # haiku = fastest first token; sonnet = smarter, ~1s slower
+  claude_cli_model: sonnet    # sonnet = best answers, ~1.3 s to first word; haiku = ~0.9 s and lighter on usage
   anthropic_model: claude-haiku-4-5
   ollama_model: qwen2.5:7b    # local fallback + live notes; follows the answer format far better than llama3.1
   ollama_url: http://localhost:11434
@@ -146,7 +144,7 @@ notes:
   update_every_s: 90          # fold new transcript into the notes this often...
   min_new_words: 60           # ...once at least this much new was said
   min_call_words: 150         # shorter "calls" (tests, false starts) don't get a notes file
-  live_backend: auto          # auto = Claude Haiku, switching to the local model when Claude is unavailable | local | claude
+  live_backend: auto          # auto = the local model (saves your Claude usage for answers), Claude if there's no local one | claude_first | claude | local
   live_model: haiku           # Claude model if the local one is unavailable
   final_model: sonnet
   # Accurate pass: the other side's audio is saved during the call, re-transcribed after it with
@@ -155,7 +153,8 @@ notes:
   accurate_pass: true
   accurate_model: large-v3
   # After each call, compare what was suggested with what you actually said and update
-  # profiles/voice.md (how you talk) + profiles/learned.md (facts, what you use/ignore).
+  # profiles/voice.md (how you talk) + profiles/<mode>/learned.md (facts, what you use/ignore,
+  # kept per kind of call so a team call never brings up job hunting or SBIR pricing).
   # Previous versions are kept in data/learn_history/.
   learn: true
   learn_min_words: 40         # need at least this much of your own speech to learn from
@@ -169,7 +168,7 @@ worklog:
     - profiles/me.md
     - profiles/work/notes.md
     - profiles/voice.md         # so "how I'd answer" in the brief sounds like you
-    - profiles/learned.md
+    - profiles/work/learned.md
   daily_model: haiku          # one call per active day — haiku keeps backfills light on usage limits
   model: sonnet               # weekly summaries + the two main docs
   parallel: 2                 # concurrent claude -p calls during backfill

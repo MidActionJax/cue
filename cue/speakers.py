@@ -29,16 +29,28 @@ def _unit(v: np.ndarray) -> np.ndarray:
     return v / (np.linalg.norm(v) + 1e-9)
 
 
-def saved_voices() -> list[str]:
-    return sorted(f.stem.replace("_", " ") for f in PROFILES.glob("*.npy") if not f.stem.startswith("_")) \
-        if PROFILES.exists() else []
+def voice_dir(mode: str | None):
+    """Saved voices are kept per kind of call: coworkers named on team calls are only matched on
+    team calls (an SBIR contact or interviewer kept getting a coworker's name). The top folder is
+    the team-call set, so voices saved before this keep working there."""
+    return PROFILES if mode in (None, "", "work", "practice") else PROFILES / mode
 
 
-def forget_voice(name: str) -> bool:
+def load_voices(mode: str | None) -> dict[str, np.ndarray]:
+    d = voice_dir(mode)
+    return {f.stem.replace("_", " "): _unit(np.load(f)) for f in d.glob("*.npy") if not f.stem.startswith("_")} \
+        if d.exists() else {}
+
+
+def saved_voices(mode: str | None = None) -> list[str]:
+    return sorted(load_voices(mode))
+
+
+def forget_voice(name: str, mode: str | None = None) -> bool:
     """Move a saved voice print aside (data/voice_backup/), so it's no longer matched but can be restored."""
     import shutil
     import time as _time
-    f = PROFILES / f"{name.replace(' ', '_')}.npy"
+    f = voice_dir(mode) / f"{name.replace(' ', '_')}.npy"
     if not f.exists():
         return False
     backup = DATA / "voice_backup"
@@ -53,7 +65,8 @@ class Speakers:
     NEW_SPEAKER_MIN_S = 3.0   # need this much speech before deciding it's someone new
 
     # cosine similarity; same person ~0.7-0.95, different people usually < 0.5
-    def __init__(self, me_threshold: float = 0.55, match_threshold: float = 0.6, new_threshold: float = 0.55):
+    def __init__(self, me_threshold: float = 0.55, match_threshold: float = 0.6, new_threshold: float = 0.55,
+                 mode: str | None = "work"):
         import sherpa_onnx
         self._ex = sherpa_onnx.SpeakerEmbeddingExtractor(
             sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(MODEL), num_threads=2))
@@ -62,11 +75,9 @@ class Speakers:
         self.me: np.ndarray | None = _unit(np.load(ME_FILE)) if ME_FILE.exists() else None
         self._me_samples: list[np.ndarray] = []
         self._me_seconds = 0.0
-        # known people from earlier calls
-        self.known: dict[str, np.ndarray] = {}
-        for f in PROFILES.glob("*.npy") if PROFILES.exists() else []:
-            if not f.stem.startswith("_"):
-                self.known[f.stem.replace("_", " ")] = _unit(np.load(f))
+        # people named on earlier calls of this kind
+        self.mode = mode
+        self.known: dict[str, np.ndarray] = load_voices(mode)
         # this call's unnamed voices: label -> (centroid sum, count)
         self._clusters: dict[str, list] = {}
         self._last_them = "Speaker 1"
@@ -126,6 +137,14 @@ class Speakers:
     SWITCH_MARGIN_SHORT = 0.15   # clips under 2.5 s
     CONTINUE_SIM = 0.5           # at least this like the current speaker = could still be them
                                  # (different people score well under 0.5 against each other)
+
+    def set_mode(self, mode: str | None) -> None:
+        """The call's kind changed (or was just picked): match that kind's saved voices."""
+        with self._lock:
+            if voice_dir(mode) != voice_dir(self.mode):
+                self.known = load_voices(mode)
+                log.info("matching %d saved voices for %s calls", len(self.known), mode or "work")
+            self.mode = mode
 
     def correct(self, wrong: str, right: str) -> None:
         """A saved voice matched the wrong person on this call: label it as `right` from now on."""
@@ -200,7 +219,7 @@ class Speakers:
         """Drop a saved voice (e.g. it was learned from the wrong person). Kept in data/voice_backup."""
         with self._lock:
             self.known.pop(name, None)
-        return forget_voice(name)
+        return forget_voice(name, self.mode)
 
     def name_speaker(self, label: str, name: str) -> None:
         """You told us 'Speaker 2' is Sam: remember the voice for future calls."""
@@ -213,6 +232,6 @@ class Speakers:
             if name in self.known:
                 centroid = _unit(self.known[name] + centroid)
             self.known[name] = centroid
-        PROFILES.mkdir(parents=True, exist_ok=True)
-        np.save(PROFILES / f"{name.replace(' ', '_')}.npy", centroid)
+        voice_dir(self.mode).mkdir(parents=True, exist_ok=True)
+        np.save(voice_dir(self.mode) / f"{name.replace(' ', '_')}.npy", centroid)
         log.info("saved voice for %s", name)

@@ -703,9 +703,17 @@ def render(text: str, fs: int) -> str:
         if not line:
             continue
         esc = html.escape(line.lstrip("-•*> ").strip())
+        if len(line) < 6 and "about:".startswith(line.lower()):
+            continue   # a label still streaming in ("Abo"): don't flash it as answer text
         if line.startswith("Q:"):
             out.append(f"<div style='color:rgba(170,200,255,190); font-size:{int(fs * 0.78)}px'>"
                        f"{html.escape(line[2:].strip())}</div>")
+        elif line.lower().startswith("about:"):   # which project it thinks this is: spot a wrong one at a glance
+            topic = html.escape(line[6:].strip())
+            if topic:
+                out.append(f"<div style='font-size:{int(fs * 0.7)}px; margin:1px 0 2px 0'>"
+                           f"<span style='color:#0f1115; background:rgba(143,180,255,0.85); border-radius:6px;'>"
+                           f"&nbsp;{topic}&nbsp;</span></div>")
         elif line.startswith(">"):
             out.append(f"<div style='font-size:{int(fs * 1.12)}px; font-weight:600; margin:2px 0 6px 0'>"
                        f"“{esc}”</div>")

@@ -41,26 +41,130 @@ class Backend:
 
 # --------------------------------------------------------------------------- Claude CLI
 
+class _Session:
+    """One `claude -p` process in stream-json mode, warmed up with the system prompt."""
+
+    def __init__(self, exe: str, model: str, system_file, on_warm: Callable[["_Session", str | None], None]):
+        args = [exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json",
+                "--verbose", "--include-partial-messages", "--model", model, "--tools", "",
+                "--no-session-persistence", "--strict-mcp-config", "--setting-sources", "",
+                "--system-prompt-file", str(system_file)]
+        env = dict(os.environ, MAX_THINKING_TOKENS="0")  # thinking costs ~2s of first-token latency
+        self.proc = subprocess.Popen(
+            args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, encoding="utf-8", bufsize=1, cwd=system_file.parent, env=env, creationflags=_NO_WINDOW,
+        )
+        self.lock = threading.Lock()
+        self.current: tuple[int, TokenCb, DoneCb] | None = None
+        self.text = ""
+        self.busy = False
+        self.answers = 0          # real answers given (the warm-up doesn't count)
+        self.warm = threading.Event()
+        self.error: str | None = None
+        self._on_warm = on_warm
+        threading.Thread(target=self._reader, daemon=True).start()
+        # warm-up turn: primes the prompt cache with the (large) context and checks auth
+        self.busy = True
+        self.current = (0, lambda *_: None, self._warm_done)
+        self._send("Reply with just OK.")
+
+    def _warm_done(self, _rid, _text, err):
+        self.error = err
+        self.warm.set()
+        self._on_warm(self, err)
+
+    @property
+    def alive(self) -> bool:
+        return self.proc.poll() is None
+
+    @property
+    def fresh(self) -> bool:
+        """Warm, idle and has never answered: its only context is the system prompt."""
+        return self.alive and self.warm.is_set() and not self.error and not self.busy and self.answers == 0
+
+    def _send(self, text: str) -> None:
+        msg = {"type": "user", "message": {"role": "user", "content": text}}
+        self.proc.stdin.write(json.dumps(msg) + "\n")
+        self.proc.stdin.flush()
+        self.text = ""
+
+    def start(self, rid: int, user: str, on_token: TokenCb, on_done: DoneCb) -> None:
+        with self.lock:
+            self.busy = True
+            self.answers += 1
+            self.current = (rid, on_token, on_done)
+            self._send(user)
+
+    def interrupt(self) -> None:
+        req = {"type": "control_request", "request_id": f"int-{time.time()}", "request": {"subtype": "interrupt"}}
+        try:
+            self.proc.stdin.write(json.dumps(req) + "\n")
+            self.proc.stdin.flush()
+        except OSError:
+            pass
+        self.current = (-1, lambda *_: None, lambda *_: None)
+
+    def _reader(self) -> None:
+        for line in self.proc.stdout:
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            try:
+                self._handle(ev)
+            except Exception:
+                log.exception("claude stream handler failed")
+        cur, self.current = self.current, None
+        if cur:
+            cur[2](cur[0], self.text, "Claude CLI exited")
+
+    def _handle(self, ev: dict) -> None:
+        kind = ev.get("type")
+        if kind == "stream_event":
+            d = ev.get("event", {})
+            if d.get("type") == "content_block_delta" and d.get("delta", {}).get("type") == "text_delta":
+                self.text += d["delta"]["text"]
+                cur = self.current
+                if cur:
+                    cur[1](cur[0], self.text)
+        elif kind == "result":
+            err = ev.get("result") if ev.get("is_error") else None
+            with self.lock:
+                cur, self.current, self.busy = self.current, None, False
+            if cur:
+                cur[2](cur[0], self.text, err)
+
+    def close(self) -> None:
+        if self.alive:
+            try:
+                self.proc.stdin.close()
+                self.proc.wait(timeout=3)
+            except Exception:
+                self.proc.kill()
+
+
 class ClaudeCLIBackend(Backend):
-    """Keeps one `claude -p` process alive in stream-json mode, so each answer only pays
-    for the API round trip (no CLI startup). Uses the user's Claude subscription login."""
+    """Answers through `claude -p` on the user's Claude subscription.
+
+    Every answer gets a fresh session whose only context is the system prompt: a session that
+    has answered earlier questions carries them along, and they bleed into later answers (a
+    question about one project answered with another's facts) and make each request bigger.
+    So one warmed-up spare is always kept ready; it answers exactly one question and the next
+    spare warms in the background (the warm-up reuses the cached system prompt, so it's cheap).
+    """
 
     name = "claude"
-    MAX_TURNS = 30  # restart to keep the session context small
 
     def __init__(self, model: str):
         self.model = model
         self.exe = shutil.which("claude")
-        self.proc: subprocess.Popen | None = None
         self.system = ""
         self._lock = threading.Lock()
-        self._current: tuple[int, TokenCb, DoneCb] | None = None
-        self._pending: tuple[int, str, TokenCb, DoneCb] | None = None
-        self._busy = False
-        self._text = ""
-        self._turns = 0
-        self._warm = threading.Event()
+        self._sessions: list[_Session] = []
+        self._active: _Session | None = None
+        self._warm = threading.Event()       # first warm-up finished (ok or not): see last_error
         self.last_error: str | None = None
+        self._sp = DATA / "tmp" / "live_system_prompt.md"
 
     @staticmethod
     def available() -> bool:
@@ -68,126 +172,85 @@ class ClaudeCLIBackend(Backend):
 
     def configure(self, system: str) -> None:
         self.system = system
-        self._restart()
+        with self._lock:
+            self._close_all()
+            self._sp.parent.mkdir(parents=True, exist_ok=True)
+            self._sp.write_text(system, encoding="utf-8")
+            self._warm.clear()
+            self._spawn()
 
-    def _restart(self) -> None:
-        self.close()
-        sp = DATA / "tmp" / "live_system_prompt.md"
-        sp.parent.mkdir(parents=True, exist_ok=True)
-        sp.write_text(self.system, encoding="utf-8")
-        cwd = DATA / "tmp"
-        args = [self.exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json",
-                "--verbose", "--include-partial-messages", "--model", self.model, "--tools", "",
-                "--no-session-persistence", "--strict-mcp-config", "--setting-sources", "",
-                "--system-prompt-file", str(sp)]
-        env = dict(os.environ, MAX_THINKING_TOKENS="0")  # thinking costs ~2s of first-token latency
-        self.proc = subprocess.Popen(
-            args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            text=True, encoding="utf-8", bufsize=1, cwd=cwd, env=env, creationflags=_NO_WINDOW,
-        )
-        self._turns = 0
-        self._busy = False
-        self._current = None
-        self._warm.clear()
-        threading.Thread(target=self._reader, args=(self.proc,), daemon=True).start()
-        # warm-up turn: primes the prompt cache with the (large) context and checks auth
-        self._busy = True
-        self._current = (0, lambda *_: None, self._warm_done)
-        self._send("Reply with just OK.")
+    def _spawn(self) -> _Session:
+        s = _Session(self.exe, self.model, self._sp, self._on_warm)
+        self._sessions.append(s)
+        return s
 
-    def _warm_done(self, _rid, _text, err):
+    def _on_warm(self, s: _Session, err: str | None) -> None:
         self.last_error = err
         if err:
             log.error("Claude CLI warm-up failed: %s", err)
-        else:
+        elif not self._warm.is_set():
             log.info("Claude CLI ready (%s)", self.model)
         self._warm.set()
 
-    def _send(self, text: str) -> None:
-        msg = {"type": "user", "message": {"role": "user", "content": text}}
-        self.proc.stdin.write(json.dumps(msg) + "\n")
-        self.proc.stdin.flush()
-        self._text = ""
+    def _prune(self) -> None:
+        keep = []
+        for s in self._sessions:
+            if not s.alive:
+                continue
+            if s.answers and not s.busy and s is not self._active:
+                s.close()   # it answered its question: retire it
+                continue
+            keep.append(s)
+        self._sessions = keep
+
+    def _keep_spare(self) -> None:
+        """Make sure one unused session is warm or warming."""
+        if not any(s.alive and s.answers == 0 and not s.error for s in self._sessions):
+            self._spawn()
 
     def ask(self, user: str, on_token: TokenCb, on_done: DoneCb) -> int:
         rid = next(_ids)
         with self._lock:
-            if self.proc is None or self.proc.poll() is not None:
-                self._restart()
-            if self._busy:
-                # cancel the in-flight answer; the new one is sent when it stops
-                if self._current and self._current[0] != 0:
-                    self._interrupt()
-                self._pending = (rid, user, on_token, on_done)
+            self._prune()
+            fresh = next((s for s in self._sessions if s.fresh), None)
+            prev = self._active
+            if fresh is not None:
+                if prev is not None and prev.busy and prev is not fresh:
+                    prev.interrupt()          # a newer question replaces the one in flight
+                self._active = fresh
+                fresh.start(rid, user, on_token, on_done)
             else:
-                self._start(rid, user, on_token, on_done)
+                # no warm spare yet (questions back to back): reuse the last session
+                s = prev if prev is not None and prev.alive else None
+                if s is None:
+                    s = next((x for x in self._sessions if x.alive and not x.error), None) or self._spawn()
+                self._active = s
+                threading.Thread(target=self._start_when_ready, args=(s, rid, user, on_token, on_done),
+                                 daemon=True).start()
+            self._keep_spare()
         return rid
 
-    def _start(self, rid, user, on_token, on_done):
-        self._busy = True
-        self._current = (rid, on_token, on_done)
-        self._send(user)
+    def _start_when_ready(self, s: _Session, rid, user, on_token, on_done) -> None:
+        if s.busy and s.current and s.current[0] not in (0, -1):
+            s.interrupt()
+        end = time.time() + 20
+        while (s.busy or not s.warm.is_set()) and s.alive and time.time() < end:
+            time.sleep(0.02)
+        if self._active is not s or not s.alive:
+            return   # superseded while waiting
+        if s.error and not s.warm.is_set():
+            on_done(rid, "", s.error)
+            return
+        s.start(rid, user, on_token, on_done)
 
-    def _interrupt(self) -> None:
-        req = {"type": "control_request", "request_id": f"int-{time.time()}", "request": {"subtype": "interrupt"}}
-        try:
-            self.proc.stdin.write(json.dumps(req) + "\n")
-            self.proc.stdin.flush()
-        except OSError:
-            pass
-        self._current = (-1, lambda *_: None, lambda *_: None)
-
-    def _reader(self, proc: subprocess.Popen) -> None:
-        for line in proc.stdout:
-            try:
-                self._handle(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-            except Exception:
-                log.exception("claude stream handler failed")
-        # process ended
-        cur = self._current
-        if cur and proc is self.proc:
-            cur[2](cur[0], self._text, "Claude CLI exited")
-
-    def _handle(self, ev: dict) -> None:
-        kind = ev.get("type")
-        if kind == "stream_event":
-            d = ev.get("event", {})
-            if d.get("type") == "content_block_delta" and d.get("delta", {}).get("type") == "text_delta":
-                self._text += d["delta"]["text"]
-                cur = self._current
-                if cur:
-                    cur[1](cur[0], self._text)
-        elif kind == "result":
-            err = ev.get("result") if ev.get("is_error") else None
-            with self._lock:
-                cur, self._current, self._busy = self._current, None, False
-                self._turns += 1
-                if cur:
-                    cur[2](cur[0], self._text, err)
-                if self._pending:
-                    p, self._pending = self._pending, None
-                    if self._turns >= self.MAX_TURNS:
-                        threading.Thread(target=self._restart_then, args=(p,), daemon=True).start()
-                    else:
-                        self._start(*p)
-
-    def _restart_then(self, p) -> None:
-        with self._lock:
-            self._restart()
-        self._warm.wait(15)
-        with self._lock:
-            self._start(*p)
+    def _close_all(self) -> None:
+        for s in self._sessions:
+            s.close()
+        self._sessions, self._active = [], None
 
     def close(self) -> None:
-        if self.proc and self.proc.poll() is None:
-            try:
-                self.proc.stdin.close()
-                self.proc.wait(timeout=3)
-            except Exception:
-                self.proc.kill()
-        self.proc = None
+        with self._lock:
+            self._close_all()
 
 
 # --------------------------------------------------------------------------- Anthropic API

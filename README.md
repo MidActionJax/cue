@@ -33,7 +33,7 @@ It's for anyone who knows their stuff but freezes when it's their turn to talk.
 | 🗣 **Understands heavy accents** | Whisper `large-v3-turbo` on your GPU, primed with your team's names and jargon, with noise and hallucination filters. Couldn't catch what someone said? **What?** (`Shift+Tab`) turns it into plain English and tells you what they want from you. |
 | 📝 **Takes the notes** | Key points, decisions, action items (yours first) and what you were asked, updated live. When the call ends you get polished notes and **a ready-to-send follow-up email**. Next time, your home screen shows what you promised. |
 | 👥 **Knows who said what** | Voice fingerprints split the call into speakers. Name someone once and they're recognized on every future call. It also tells your voice apart from other people in the room. |
-| 📈 **Learns how you talk** | After each call it compares what it suggested with what you actually said, and learns your phrasing, what you use and skip, and facts you stated. Suggestions sound more like you every week. |
+| 📈 **Learns how you talk** | After each call it compares what it suggested with what you actually said, and learns your phrasing, what you use and skip, and facts you stated. Facts are kept per kind of call, so a team call never brings up your consulting or job hunt. Suggestions sound more like you every week. |
 | 📄 **Answers from your documents** | Add PDFs, Word files or text (tray → *Add documents…*, or drag them onto the panel): a solicitation, a paper, a project plan. When you're asked about something in them, the talking points use the document's real figures and wording. Big documents are searched, so only the passages that match the question go along. |
 | 🤝 **SBIR mode** | For consulting calls with SBIR program managers and founders: answers from your offer, proof and FAQ, a per-contact prep sheet built from your tracker spreadsheets, and a rules file it never breaks (no invented prices, clients or endorsements). |
 | 🎯 **Practice mode** | It asks likely questions out loud, you answer out loud, and it coaches you with what worked, what to add, and a tighter version in your own words. |
@@ -79,9 +79,10 @@ flowchart LR
 
 | Job | Model | Why |
 |---|---|---|
-| Live answers, scripts, **What?** | Claude Haiku in a persistent session (~0.5 s to first word) | speed and quality |
-| …if Claude errors, stalls or hits a usage limit | local `qwen2.5:7b` via Ollama, same context, automatic | never leaves you hanging mid-call |
+| Live answers, scripts, **What?** | Claude Sonnet, a fresh session for every answer (~1.3 s to first word) | best on real calls: picks the right project and invents nothing |
+| …if Claude errors, stalls or hits a usage limit | local `qwen2.5:7b` via Ollama, a short instruction set, answers checked before they're shown; back to Claude at the limit's reset time | never leaves you hanging mid-call |
 | "Is that question for me?" | local `qwen2.5:7b` (~0.3 s) | free and instant |
+| Live notes during the call | local `qwen2.5:7b` (Claude if there's no local model) | saves your Claude usage for answers |
 | Final notes, learning, the weekly brief | Claude Sonnet | quality |
 | Speech-to-text, voice fingerprints | Whisper `large-v3-turbo`, WeSpeaker ResNet34, all local | fast, private |
 
@@ -175,9 +176,12 @@ the **Them** light should turn green (click it to pick your call's audio device)
 `Tab` still types a Tab in whatever app you're in; Alt+Tab and Ctrl+Tab don't trigger it.
 
 **Names.** In the transcript pane, click **Speaker 2 ✎** and type who it is. Their voice is saved,
-and every future call labels them automatically. For the hardest-to-understand speaker, add their name
-to `stt.accurate_speakers` to route only their speech through the slower, more accurate
-`large-v3` model.
+and every future call of that kind labels them automatically (voices are kept per mode, so a
+coworker's voice is never matched on an SBIR call or an interview). A wrong name is clickable too:
+fix it and the whole call is relabeled; tray → *Saved voices* → *Forget* drops a voice learned from
+the wrong person. `cue-cli notes rewrite <call>` writes a call's notes again afterwards. For the
+hardest-to-understand speaker, add their name to `stt.accurate_speakers` to route only their
+speech through the slower, more accurate `large-v3` model.
 
 **Interviews.** Drop your resume and the job description (`job.md`) into `profiles/interview/`
 and run `cue-cli prep` (`prep.cmd` from source). You get a 30-second intro, likely questions with talking points in your

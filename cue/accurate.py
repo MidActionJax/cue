@@ -51,8 +51,13 @@ def run(stamp: str, cfg, meta: dict, live: str, mode: str) -> str | None:
     if not chunks:
         log.warning("accurate pass: no speech found in %s", pcm.name)
         return None
-    labels = diarize(audio, chunks)
-    # corrections like "Sam" -> "Priya" carry over; live "Speaker N" numbers don't match ours
+    labels = align(chunks, live_speakers(live, datetime.fromisoformat(meta["started"])), started)
+    if any(l is None for l in labels):   # stretches the live transcript missed: group by voice
+        fill = diarize(audio, chunks, meta.get("kind") or mode)
+        # unknown voices found here are "Voice N", so they can't be mistaken for the live "Speaker N"
+        labels = [l if l is not None else ("Voice " + f.split()[-1] if f.startswith("Speaker ") else f)
+                  for l, f in zip(labels, fill)]
+    # names fixed mid-call are already in `live`; this only covers corrections like "Sam" -> "Priya"
     renames = {k: v for k, v in (meta.get("speakers") or {}).items() if v and not k.startswith("Speaker ")}
     them = [(started + s, f"THEM ({renames.get(lab, lab)})", text) for (s, e, text), lab in zip(chunks, labels)]
     text = merge(them, live, datetime.fromisoformat(meta["started"]), started)
@@ -110,19 +115,69 @@ def _join(words) -> tuple[float, float, str]:
 
 
 # ------------------------------------------------------------------ who spoke when
+# Names come from the live transcript, lined up by time. Its labels were matched one clip at a
+# time with a high bar and a "same person is still talking" rule, and you can see and correct
+# them during the call. Grouping the whole call by voice afterwards looked perfect on a test
+# recording but was wrong on every real call (Zoom-compressed voices are far more alike: a new
+# SBIR contact became a coworker, several coworkers merged into one), so it only fills gaps.
+_LIVE = re.compile(r"^(\d\d):(\d\d):(\d\d) THEM(?: \(([^)]+)\))?: (.*)$")
+
+
+def live_speakers(live: str, call_start: datetime) -> list[tuple[float, str, int]]:
+    """[(wall time, label, characters)] for the other side's lines in the live transcript."""
+    out = []
+    for line in live.splitlines():
+        m = _LIVE.match(line)
+        if not m:
+            continue
+        when = call_start.replace(hour=int(m.group(1)), minute=int(m.group(2)), second=int(m.group(3)), microsecond=0)
+        if when < call_start - timedelta(hours=1):
+            when += timedelta(days=1)
+        out.append((when.timestamp(), m.group(4) or "Speaker 1", len(m.group(5))))
+    return out
+
+
+def align(chunks: list[tuple[float, float, str]], live: list[tuple[float, str, int]], audio_start: float):
+    """Each accurate passage takes the label of the live lines it overlaps (weighted by how much
+    was said); None where the live transcript has nothing nearby."""
+    if not live:
+        return [None] * len(chunks)
+    times = [t for t, _l, _n in live]
+    from bisect import bisect_left, bisect_right
+    labels: list[str | None] = []
+    for s, e, _t in chunks:
+        a, b = audio_start + s, audio_start + e
+        lo, hi = bisect_left(times, a - 2.0), bisect_right(times, b + 1.0)
+        votes: dict[str, int] = {}
+        for t, lab, n in live[lo:hi]:
+            if lab != "In room":
+                votes[lab] = votes.get(lab, 0) + max(n, 1)
+        if not votes:   # the live line for this stretch started a little earlier
+            j = bisect_right(times, a) - 1
+            if j >= 0 and a - times[j] <= 12 and live[j][1] != "In room":
+                votes[live[j][1]] = 1
+        labels.append(max(votes, key=votes.get) if votes else None)
+    # a lone short passage between two of the same speaker is that speaker (a mid-sentence flip)
+    for i in range(1, len(labels) - 1):
+        if labels[i - 1] and labels[i - 1] == labels[i + 1] != labels[i] and chunks[i][1] - chunks[i][0] < 3.0:
+            labels[i] = labels[i - 1]
+    return labels
+
+
 SWITCH_COST = 0.12      # a speaker change has to be worth this much similarity
 CLUSTER_SIM = 0.62      # a passage joins a voice group at this similarity (different people ~0.5)
 MERGE_SIM = 0.75        # two groups this alike are the same person
 MIN_VOICE_S = 4.0       # less speech than this isn't a voice of its own (a cough, a crosstalk blip)
-NAME_SIM = 0.55         # a group's average voice must match a saved person this well to get their name
+NAME_SIM = 0.72         # a group's average voice must match a saved person this well to get their name
+                        # (0.55 named strangers after coworkers on real calls; live uses 0.65 per clip)
 
 
-def diarize(audio: np.ndarray, chunks: list[tuple[float, float, str]]) -> list[str]:
+def diarize(audio: np.ndarray, chunks: list[tuple[float, float, str]], mode: str | None = "work") -> list[str]:
     """1) group the whole call into voices, 2) name each group after the saved person it matches
     best (each person at most once), 3) smooth: a speaker change must be worth it."""
     from .speakers import Speakers
 
-    spk = Speakers()
+    spk = Speakers(mode=mode)
     embs, weights, durs = [], [], []
     for s, e, _t in chunks:
         a, b = int(s * SR), int(e * SR)

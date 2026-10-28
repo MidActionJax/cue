@@ -10,6 +10,7 @@
     Cue.exe docs list | remove NAME
     Cue.exe accent-test FILE     compare Whisper models on a recording
     Cue.exe devices              list audio devices
+    Cue.exe notes rewrite <call>  write a call's final notes again (e.g. after fixing a name)
     Cue.exe notes finalize|recover ...   (internal: finishing a call's notes)
 
 From source the same commands are `python -m cue.cli <command> ...`.

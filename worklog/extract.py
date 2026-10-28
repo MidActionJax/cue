@@ -239,16 +239,17 @@ def meeting_notes(since: date, until: date) -> dict[date, list[str]]:
 
 
 def _is_sbir_call(p: Path) -> bool:
-    """SBIR consulting calls stay out of the work brief: that's a separate practice, not the job.
-    (They live in meetings/ and contacts_manual.md.)"""
+    """Only team calls feed the work brief. SBIR consulting calls are a separate practice (they
+    live in meetings/ and contacts_manual.md) and interviews are job hunting: an interviewer
+    once got written into the work history as a coworker."""
     sidecar = _HOME / "data" / "calls" / f"{p.stem}.json"
     try:
-        if json.loads(sidecar.read_text(encoding="utf-8")).get("mode") == "sbir":
+        if json.loads(sidecar.read_text(encoding="utf-8")).get("mode") in ("sbir", "interview", "practice"):
             return True
     except (OSError, ValueError):
         pass
     first = p.read_text(encoding="utf-8", errors="replace").lstrip()[:80].lower()
-    return first.startswith(("# sbir call", "# sbir consulting call"))
+    return first.startswith(("# sbir call", "# sbir consulting call", "# interview", "# job interview"))
 
 
 def build_digests(sessions: dict[str, Session], commits: dict[date, list[str]],

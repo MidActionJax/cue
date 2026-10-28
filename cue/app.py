@@ -8,7 +8,7 @@ import re
 import subprocess
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
@@ -95,6 +95,7 @@ class Controller(QObject):
         self.doc_retriever = None
         self._doc_failed: set = set()               # (path, mtime) of documents that can't be read
         self._system_local = ""
+        self._answered: list[tuple[float, str]] = []   # (when, question) shown this call
 
         b = self.bridge
         b.text.connect(self._on_text)
@@ -175,30 +176,22 @@ class Controller(QObject):
     def _new_notes(self) -> NoteTaker:
         return NoteTaker(self.cfg.notes, self.cfg.llm, self.name,
                          lambda: "practice" if self.practice else (self.mode or "work"),
-                         lambda md: self.bridge.notes.emit(md), self.cfg.user.aliases)
+                         lambda md: self.bridge.notes.emit(md), self.cfg.user.aliases,
+                         get_kind=lambda: self.practice.kind if self.practice else (self.mode or "work"))
 
     def load_mode(self):
         if self.mode is None:
             return
-        mcfg = self.cfg.modes[self.mode]
-        rules_file = mcfg.get("rules")
-        context, files = load_context(mcfg["context"], exclude=[rules_file] if rules_file else [])
-        rules = ""
-        if rules_file and resolve(rules_file).exists():
-            rules = load_context([rules_file])[0]
-            files.append(f"{rules_file} (rules, last)")
-        dc = doclib.build(self.mode, int(self._docs_cfg("whole_chars", 120_000)))
+        self._system, local_system, files, dc = build_system(self.cfg, self.mode)
+        if self.speakers:   # match the saved voices of this kind of call
+            self.speakers.set_mode(self.practice.kind if self.practice else self.mode)
+        self._system_local = local_system
         self.doc_retriever = dc.retriever
-        searched = dc.retriever.names if dc.retriever else []
-        args = (self.name, self.mode, context, self.cfg.user.aliases, rules, dc.whole, searched)
-        self._system = prompts.system_prompt(*args)
-        # small local model: documents are trimmed first, then context; instructions + rules always stay
-        local_system = self._system_local = prompts.system_prompt(*args, max_chars=self.cfg.llm.ollama_context_chars)
         if getattr(self, "stt", None):
             self.stt.vocabulary = load_vocabulary(self.cfg.stt.vocabulary, self.mode)
         self.backend.configure(local_system if self.backend.name == "ollama" else self._system)
         log.info("mode=%s trigger=%s backend=%s context=%d chars from %s; documents: %s",
-                 self.mode, self.trigger, self.backend.name, len(context), files, dc.used or "none")
+                 self.mode, self.trigger, self.backend.name, len(self._system), files, dc.used or "none")
         # keep the local model loaded with the same context, so a mid-call fallback is instant
         if self.backend.name != "ollama" and OllamaBackend.available(self.cfg.llm.ollama_url):
             self.local = self.local or make_local(self.cfg.llm)
@@ -505,7 +498,7 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
 
     def _mark_claude_down(self, reason: str):
         # usage limits last hours; network blips don't
-        self._claude_down_until = time.time() + (1800 if "limit" in reason.lower() else 120)
+        self._claude_down_until = claude_back_at(reason)
         self._update_title()
 
     def ask(self, kind: str, fmt: str | None = None, transcript: str | None = None, status: str = ""):
@@ -534,7 +527,9 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
                                                     max_chars=int(self._docs_cfg("excerpt_chars", 5000)))
             except Exception:
                 log.exception("document search failed")
-        self._last_user = prompts.user_prompt(self.name, kind, transcript, fmt, excerpts)
+        recent = [] if kind in ("explain", "practice") else \
+            [q for t, q in self._answered if time.time() - t < min(window, 300)][-3:]
+        self._last_user = prompts.user_prompt(self.name, kind, transcript, fmt, excerpts, recent)
         them = [m.group(1) for m in (re.match(r"^(?:\[-\d+s\] )?THEM[^:]*:\s*(.*)", l) for l in transcript.splitlines())
                 if m and m.group(1).strip()]
         self._newest_them = them[-1].strip() if them else ""
@@ -585,6 +580,9 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         self._got_output = True   # even a SKIP means the model is alive (no fallback needed)
         if self._maybe_skip(text):
             return
+        if self._req_backend is self.local or self._req_backend.name == "ollama":
+            return   # the small model's answer is checked before any of it is shown (see _on_done)
+        text = clean_answer(text)
         if not self._first_token:
             self._first_token = True
             self._reset_fade()
@@ -600,6 +598,19 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
                 self.overlay.show_status(f"LLM error: {str(err)[:120]}", 5000)
             return
         log.info("answer done in %.2fs", time.monotonic() - self._t_ask)
+        text = clean_answer(text)
+        if not self._maybe_skip(text):
+            weak = self._req_backend is self.local or self._req_backend.name == "ollama"
+            problem = answer_problem(text, self.name, self.cfg.user.aliases, strict=weak)
+            if problem:
+                log.warning("dropped a %s answer (%s): %s", self._req_backend.name, problem, text.replace("\n", " | ")[:300])
+                if self.req_kind in ("manual", "explain"):
+                    until = f" until {datetime.fromtimestamp(self._claude_down_until):%H:%M}" if self._claude_down() else ""
+                    self.overlay.show_answer(self.req_status, "Q: The backup model couldn't answer that well\n"
+                                             f"- Claude is unavailable{until}; press Tab again to retry")
+                elif self.overlay.showing_answer:
+                    self.overlay.fade_out()
+                return
         if self._maybe_skip(text):
             log.info("model: not a question for %s (SKIP)", self.name)
             if self.req_kind in ("manual", "explain"):
@@ -609,6 +620,10 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
                 self.overlay.fade_out()
             return
         self.last_answer = text
+        q = next((l[2:].strip() for l in text.splitlines() if l.startswith("Q:")), "")
+        if q and self.req_kind not in ("explain", "practice"):
+            self._answered.append((time.time(), q))
+            self._answered = self._answered[-6:]
         self.overlay.show_answer(self.req_status, text)
         if self.notes:
             self.notes.add_assist(text)  # lets the post-call learning compare this with what you said
@@ -695,7 +710,7 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
     def _fill_voices_menu(self, menu: QMenu):
         from .speakers import saved_voices
         menu.clear()
-        names = saved_voices()
+        names = saved_voices(self.mode)
         if not names:
             menu.addAction("No saved voices yet").setEnabled(False)
         for n in names:
@@ -704,7 +719,7 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
 
     def _forget_voice(self, name: str):
         from .speakers import forget_voice
-        ok = self.speakers.forget(name) if self.speakers else forget_voice(name)
+        ok = self.speakers.forget(name) if self.speakers else forget_voice(name, self.mode)
         self.overlay.show_status(f"Forgot {name}'s voice. Name them again when they next speak." if ok
                                  else f"No saved voice for {name}", 4000)
 
@@ -1077,6 +1092,111 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         # not quit(): in Qt 6 that first asks each window to close, and the panel refuses
         # (its close routes back here), which cancels the quit
         QApplication.exit(0)
+
+
+def claude_back_at(reason: str, now: float | None = None) -> float:
+    """When to try Claude again. A usage limit says when it resets ("resets 12:30pm"): go back to
+    Claude right then instead of a fixed half hour (10/26: the limit reset at 12:30 but the rest of
+    the call stayed on the weak local model). Network blips: two minutes."""
+    now = time.time() if now is None else now
+    m = re.search(r"resets?\s+(?:at\s+)?(\d{1,2})(?::(\d\d))?\s*([ap])\.?m", reason, re.I)
+    if m:
+        h, mi, ap = int(m.group(1)) % 12, int(m.group(2) or 0), m.group(3).lower()
+        h += 12 if ap == "p" else 0
+        base = datetime.fromtimestamp(now)
+        t = base.replace(hour=h, minute=mi, second=20, microsecond=0)
+        if t.timestamp() <= now:
+            t += timedelta(days=1)
+        return min(t.timestamp(), now + 6 * 3600)
+    return now + (1800 if "limit" in reason.lower() else 120)
+
+
+def clean_answer(text: str) -> str:
+    """Drop prompt echoes ("FORMAT: SCRIPT") and markdown a model sometimes adds."""
+    lines = [l for l in text.splitlines() if not re.match(r"^\s*(FORMAT|Trigger)\s*:", l, re.I)]
+    out = "\n".join(re.sub(r"\*\*(.+?)\*\*", r"\1", l) for l in lines).strip()
+    # an answer that ends in a stray "SKIP" (a model hedging between answering and not): the
+    # answer stands; "SKIP" plus an explanation is just a SKIP
+    if not out.upper().startswith("SKIP"):
+        out = re.sub(r"(?:\n\s*)+SKIP\s*$", "", out, flags=re.I).strip()
+    return out
+
+
+def answer_problem(text: str, name: str, aliases: list[str] = (), strict: bool = True) -> str | None:
+    """Why an answer must not be shown, or None. Catches the ways a weak model fails: narrating
+    ("Jaxon can say..."), speaking as the other side ("Jaxon, did you..."), echoing transcript
+    labels, or not giving anything to say at all."""
+    t = text.strip()
+    if not t:
+        return "empty"
+    names = {name.lower(), *(a.lower() for a in aliases)}
+    # strict = the weak local model's failure modes. Claude doesn't fail this way, and a real answer
+    # may well say "transcript" or start with a teammate's name, so it only gets the basic checks.
+    for raw in (t.splitlines() if strict else []):
+        line = raw.strip().lstrip("-•*>").strip().strip('"“”').lower()
+        if re.match(r"^(q|about|for you)\s*:", line):
+            continue
+        first = re.split(r"[\s,:]+", line, maxsplit=1)[0] if line else ""
+        if first in names:
+            return "addresses or narrates about the user"
+        if re.search(r"\bthem \(|\bthem:|\btranscript\b|\bassist(ant)?\b|\byou should\b|\bcan say\b", line):
+            return "narration instead of words to say"
+    body = [l for l in t.splitlines() if l.strip() and not re.match(r"^\s*(Q|About)\s*:", l)]
+    if not body:
+        return "nothing to say"
+    return None
+
+
+def strip_sections(md: str, heading: str) -> str:
+    """Drop markdown sections whose heading matches `heading` (up to the next heading of the same
+    or a higher level). File markers like '=== last_week.md ===' always end a section."""
+    out, skip_level = [], 0
+    for line in md.splitlines():
+        m = re.match(r"^(#{1,6})\s+(.*)$", line)
+        if line.startswith("=== ") and line.rstrip().endswith(" ==="):
+            skip_level = 0
+        elif m:
+            level = len(m.group(1))
+            if skip_level and level <= skip_level:
+                skip_level = 0
+            if not skip_level and re.search(heading, m.group(2), re.I):
+                skip_level = level
+                continue
+        if not skip_level:
+            out.append(line)
+    return "\n".join(out)
+
+
+def mode_context(cfg, mode: str) -> list[str]:
+    """The mode's context files, with what was learned on calls taken from that mode's own file.
+    (Older configs list one shared profiles/learned.md for every mode; that mixed team-call,
+    SBIR and job-search facts into every answer.)"""
+    entries = [e for e in cfg.modes[mode]["context"] if e.replace("\\", "/") != "profiles/learned.md"]
+    own = f"profiles/{mode}/learned.md"
+    covered = any(e.replace("\\", "/").rstrip("/") in (own, f"profiles/{mode}") for e in entries)
+    return entries if covered else entries + [own]
+
+
+def build_system(cfg, mode: str):
+    """(system prompt, small-model system prompt, files used, documents) for a mode."""
+    mcfg = cfg.modes[mode]
+    rules_file = mcfg.get("rules")
+    context, files = load_context(mode_context(cfg, mode), exclude=[rules_file] if rules_file else [])
+    if mode == "work":
+        # team calls are about the job: side projects (consulting, apps) in the brief and history
+        # only ever led to answers about the wrong thing
+        context = strip_sections(context, r"side projects?")
+    rules = ""
+    if rules_file and resolve(rules_file).exists():
+        rules = load_context([rules_file])[0]
+        files.append(f"{rules_file} (rules, last)")
+    dc = doclib.build(mode, int((cfg.get("docs") or {}).get("whole_chars") or 120_000))
+    searched = dc.retriever.names if dc.retriever else []
+    args = (cfg.user.name, mode, context, cfg.user.aliases, rules, dc.whole, searched)
+    full = prompts.system_prompt(*args)
+    # small local model: documents are trimmed first, then context; instructions + rules always stay
+    local = prompts.system_prompt(*args, max_chars=cfg.llm.ollama_context_chars, compact=True)
+    return full, local, files, dc
 
 
 def _doc_key(d) -> tuple:

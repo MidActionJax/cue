@@ -6,6 +6,7 @@ call ends, a detached process writes the polished final version (Sonnet), so qui
 
     Cue.exe notes finalize <stamp>     (one call)
     Cue.exe notes recover              (any call that was never finalized)
+    Cue.exe notes rewrite <stamp>...   (write a call's final notes again, e.g. after fixing a name)
 
 The worklog job picks meetings/*.md up, so calls land in your work history too.
 """
@@ -94,7 +95,7 @@ LEARN = """You maintain two small files that make {name}'s live call assistant b
 
 VOICE (profiles/voice.md) — how {name} actually talks on calls: typical length, how answers are structured (result first? context first?), openers and phrases {name} really uses, formality, words to avoid because {name} never says them. End with "## Examples": 5–10 short answers in {name}'s own words (fix transcription errors, keep their phrasing), each preceded by the question it answered.
 
-LEARNED (profiles/learned.md) — what the assistant should know next time:
+LEARNED (profiles/{learn_mode}/learned.md) — what the assistant should know next time on this kind of call ({learn_kind}). Only what matters on calls like this one: facts from other parts of {name}'s life (other jobs, job hunting, side businesses, personal plans) don't go here even if they came up:
 ## Facts from calls   (things {name} or others stated: statuses, numbers, decisions, owners — each with its date; newer replaces older)
 ## What {name} uses vs ignores   (which kinds of suggested points {name} actually said out loud, which were skipped or corrected)
 ## Recurring questions   (what gets asked, by whom if known, and the answer {name} gave)
@@ -140,7 +141,15 @@ RULES:
 CONTACTS (what was known before the call):
 {contacts}"""
 VOICE = ROOT / "profiles" / "voice.md"
-LEARNED = ROOT / "profiles" / "learned.md"
+
+
+def learned_path(mode: str):
+    """What Cue learned on calls is kept per kind of call: team-call facts never show up on an
+    SBIR or interview call (and job hunting never shows up on a team call)."""
+    return ROOT / "profiles" / (mode if mode in ("work", "sbir", "interview") else "work") / "learned.md"
+
+
+LEARNED = learned_path("work")
 
 
 def _glossary() -> str:
@@ -155,8 +164,9 @@ class NoteTaker:
     so a call that never got finalized (window closed, usage limit) is picked up later."""
 
     def __init__(self, cfg, llm_cfg, name: str, get_mode: Callable[[], str], on_update: Callable[[str], None],
-                 aliases: list[str] = ()):
+                 aliases: list[str] = (), get_kind: Callable[[], str] | None = None):
         self.cfg, self.llm_cfg, self.name, self.get_mode, self.on_update = cfg, llm_cfg, name, get_mode, on_update
+        self.get_kind = get_kind
         self.aliases = [a for a in aliases if a.lower() != name.lower()] or [name]
         self.started = datetime.now()
         self.stamp = self.started.strftime("%Y-%m-%d_%H%M")
@@ -185,6 +195,8 @@ class NoteTaker:
     def write_sidecar(self) -> None:
         CALLS.mkdir(parents=True, exist_ok=True)
         meta = {"mode": self.get_mode(), "started": self.started.isoformat(), "speakers": self.speaker_names}
+        if self.get_kind:
+            meta["kind"] = self.get_kind()   # which mode's learned.md this call teaches (practice: what was practiced)
         if self.recorder is not None and self.recorder.started:
             meta["audio"] = {"file": self.recorder.path.name, "started": self.recorder.started}
         (CALLS / f"{self.stamp}.json").write_text(json.dumps(meta), encoding="utf-8")
@@ -262,13 +274,17 @@ _claude_notes_down_until = 0.0
 
 
 def _live_llm(prompt: str, cfg, llm_cfg) -> str:
-    """auto: Claude Haiku (small usage, much better notes than a 7B model), switching to the
-    local model for 30 min whenever Claude fails (e.g. usage limit). local / claude: forced."""
+    """The running notes during a call. auto: the local model when it's there (these notes are a
+    draft: the final notes come from Claude, and ~60 Claude calls per long call used up the
+    usage limit mid-call, which took the live answers down with it); Claude Haiku otherwise.
+    claude / local: forced. claude_first: Claude, the local model while Claude is failing."""
     global _claude_notes_down_until
     from worklog.summarize import claude_p
 
     from .llm import OllamaBackend, local_chat
     local_ok = cfg.live_backend != "claude" and OllamaBackend.available(llm_cfg.ollama_url)
+    if cfg.live_backend == "auto" and local_ok:
+        return local_chat(prompt, "Output only the notes.", llm_cfg.ollama_model, llm_cfg.ollama_url)
     if cfg.live_backend != "local" and (time.time() > _claude_notes_down_until or not local_ok):
         try:
             return claude_p(prompt, "Output only the notes.", cfg.live_model, timeout=120, retries=0)
@@ -301,9 +317,12 @@ def _delete_audio(stamp: str) -> None:
         log.warning("couldn't delete %s: %s", p.name, e)
 
 
-def finalize(stamp: str) -> None:
+def finalize(stamp: str, rewrite: bool = False) -> None:
     """Final notes (Sonnet) + learning for one call. Only marks the call done if both succeed,
-    so a usage-limit failure gets retried by recover()."""
+    so a usage-limit failure gets retried by recover().
+
+    rewrite: write the final notes again from the saved transcript (e.g. after fixing a speaker's
+    name), keeping the old version in data/notes_backup/. Nothing is learned or filed again."""
     from worklog.summarize import claude_p
     from . import config
 
@@ -316,6 +335,12 @@ def finalize(stamp: str) -> None:
         transcript = transcript.replace(f"({label})", f"({real})")
     notes_path = MEETINGS / f"{stamp}.md"
     notes = notes_path.read_text(encoding="utf-8") if notes_path.exists() else "(none)"
+    if rewrite:
+        if notes_path.exists():
+            backup = DATA / "notes_backup"
+            backup.mkdir(parents=True, exist_ok=True)
+            (backup / f"{stamp}-{datetime.now():%Y%m%d-%H%M%S}.md").write_text(notes, encoding="utf-8")
+        notes = "(not available: write the notes from the transcript alone)"
     last = (CALLS / f"{stamp}.txt").stat().st_mtime
     minutes = max(1, int((last - start.timestamp()) // 60))
     if mode != "practice":
@@ -343,10 +368,15 @@ def finalize(stamp: str) -> None:
         text = claude_p(prompt, "Output only the notes.", cfg.notes.final_model, timeout=600)
         MEETINGS.mkdir(parents=True, exist_ok=True)
         notes_path.write_text(text.strip() + "\n", encoding="utf-8")
+        if rewrite:
+            log.info("rewrote the notes for %s", stamp)
+            return
         if mode == "sbir":
             _save_promises(text, start)
+    elif rewrite:
+        return
     if cfg.notes.learn:
-        learn(cfg, transcript, mode, start)
+        learn(cfg, transcript, mode, start, meta.get("kind"))
     _delete_audio(stamp)   # only once the notes exist: a failed run keeps it for recover()
     _mark_done(stamp)
     log.info("finalized %s", stamp)
@@ -407,7 +437,7 @@ def recover() -> None:
 
 
 
-def learn(cfg, transcript: str, mode: str, start: datetime) -> None:
+def learn(cfg, transcript: str, mode: str, start: datetime, learn_into: str | None = None) -> None:
     """Update voice.md / learned.md from what you actually said on this call."""
     from worklog.summarize import claude_p
 
@@ -416,20 +446,24 @@ def learn(cfg, transcript: str, mode: str, start: datetime) -> None:
     if sum(len(l.split()) for l in mine) < cfg.notes.learn_min_words:
         log.info("not enough of your own speech to learn from")
         return
+    learn_mode = learn_into or (mode if mode in ("work", "sbir", "interview") else "work")
+    learned = learned_path(learn_mode)
     read = lambda p: p.read_text(encoding="utf-8") if p.exists() else "(empty — first call)"
     out = claude_p(LEARN.format(name=name, NAME=name.upper(), kind=KIND[mode], when=f"{start:%Y-%m-%d %H:%M}",
-                                voice=read(VOICE), learned=read(LEARNED), transcript=transcript[-120_000:]),
+                                learn_mode=learn_mode, learn_kind=KIND[learn_mode],
+                                voice=read(VOICE), learned=read(learned), transcript=transcript[-120_000:]),
                    "Output only the two files in the requested format.", cfg.notes.final_model, timeout=600)
     if "===VOICE===" not in out or "===LEARNED===" not in out:
         log.warning("learning output malformed; files left unchanged")
         return
-    voice, learned = out.split("===VOICE===", 1)[1].split("===LEARNED===", 1)
+    voice, new_learned = out.split("===VOICE===", 1)[1].split("===LEARNED===", 1)
     backup = DATA / "learn_history"
     backup.mkdir(parents=True, exist_ok=True)
     stamp = f"{start:%Y-%m-%d_%H%M}"
-    for path, new in ((VOICE, voice), (LEARNED, learned)):
+    for path, new in ((VOICE, voice), (learned, new_learned)):
         if path.exists():
-            (backup / f"{stamp}_{path.name}").write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+            (backup / f"{stamp}_{path.parent.name}_{path.name}").write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(new.strip() + "\n", encoding="utf-8")
 
 
@@ -439,6 +473,10 @@ def cli(args: list[str]) -> int:
                         handlers=[logging.FileHandler(DATA / "logs" / "notes.log", encoding="utf-8")])
     if len(args) >= 2 and args[0] == "finalize":
         finalize(args[1])
+    elif len(args) >= 2 and args[0] == "rewrite":
+        for stamp in args[1:]:
+            finalize(stamp, rewrite=True)
+            print(f"rewrote {MEETINGS / (stamp + '.md')}")
     elif args and args[0] == "recover":
         recover()
     else:
