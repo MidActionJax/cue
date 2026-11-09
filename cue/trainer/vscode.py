@@ -6,6 +6,7 @@ import json
 import logging
 import shutil
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -17,8 +18,16 @@ EXT_DIR = APP_DIR / "tools" / "vscode-cue-trainer"
 EXT_ID = "midactionjax.cue-trainer"
 
 
+MAC_CLI = [Path(base) / app / "Contents" / "Resources" / "app" / "bin" / cli
+           for base in ("/Applications", str(Path.home() / "Applications"))
+           for app, cli in (("Visual Studio Code.app", "code"), ("Visual Studio Code - Insiders.app", "code-insiders"))]
+
+
 def code_cli() -> str | None:
-    return shutil.which("code") or shutil.which("code-insiders")
+    found = shutil.which("code") or shutil.which("code-insiders")
+    if not found and sys.platform == "darwin":   # "Install 'code' command in PATH" is optional on a Mac
+        found = next((str(p) for p in MAC_CLI if p.exists()), None)
+    return found
 
 
 def _code(*args: str, timeout: float = 60) -> subprocess.CompletedProcess:

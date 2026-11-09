@@ -24,6 +24,7 @@ def transcript_roots() -> list[Path]:
     roots = [HOME / ".claude" / "projects", HOME / "AppData" / "Roaming" / "Claude" / "local-agent-mode-sessions"]
     # The Claude desktop app is an MSIX package; some of its data is redirected here.
     roots += (HOME / "AppData" / "Local" / "Packages").glob("Claude_*/LocalCache/Roaming/Claude/local-agent-mode-sessions")
+    roots.append(HOME / "Library" / "Application Support" / "Claude" / "local-agent-mode-sessions")   # macOS
     return [r for r in roots if r.exists()]
 
 

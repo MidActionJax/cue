@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-2b3a55?style=flat-square">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20%C2%B7%20macOS%2013%2B%20(Apple%20Silicon)-2b3a55?style=flat-square">
   <img alt="Python" src="https://img.shields.io/badge/python-3.11-2b3a55?style=flat-square">
   <img alt="Status" src="https://img.shields.io/badge/status-beta-4cd97b?style=flat-square">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-8fb4ff?style=flat-square">
@@ -172,7 +172,8 @@ needed (one is supported if you have it).
 
 ## Getting started
 
-**You need:** Windows 10/11 · an NVIDIA GPU (built on an RTX 3060, 12 GB) ·
+**You need:** Windows 10/11 with an NVIDIA GPU (built on an RTX 3060, 12 GB), **or** a Mac with
+Apple Silicon (M1 or newer, macOS 13+; 16 GB of memory recommended) ·
 [Claude Code](https://docs.claude.com/en/docs/claude-code) logged in to your Claude account
 (`claude auth login`) · [Ollama](https://ollama.com) with `ollama pull qwen2.5:7b` (the local
 fallback) · ~6 GB of disk.
@@ -191,6 +192,31 @@ app and that task and **leaves your data folder alone**. Upgrading keeps everyth
 > **Beta:** the installer isn't code-signed yet, so Windows SmartScreen may warn on first run.
 > Choose *More info → Run anyway*.
 
+### Install on a Mac (Apple Silicon)
+
+1. Download **`Cue-<version>-mac-arm64.dmg`** from the [latest release](https://github.com/MidActionJax/cue/releases),
+   open it and drag **Cue** onto **Applications**.
+2. The app isn't notarized by Apple yet, so the first time, **right-click Cue → Open → Open**.
+   (If macOS says it's damaged, run `xattr -dr com.apple.quarantine /Applications/Cue.app` once.)
+3. Allow what Cue asks for, then **quit and reopen Cue** (macOS applies these on restart):
+
+   | Permission (System Settings → Privacy & Security) | Why |
+   |---|---|
+   | **Microphone** | your side of the call |
+   | **Screen & System Audio Recording** | the other people's voices. Cue records audio only, never your screen |
+   | **Accessibility** (and **Input Monitoring** if listed) | the global `Tab` / shortcut keys |
+
+Your data goes in `~/Cue` (to put it elsewhere, write a folder path into
+`~/Library/Application Support/Cue/cue_home.txt`). Transcription runs on the Mac's GPU with
+[MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper); the model downloads on
+the first call. The daily 7:30 work-brief refresh is set up automatically (a launchd agent; turn it
+off with `worklog: daily_job: false`). The command line is the app itself:
+`/Applications/Cue.app/Contents/MacOS/Cue worklog --backfill`.
+
+Mac notes: Cue's panel hides from screen sharing where macOS allows it, but macOS 15's capture can
+still show it, so check before you share your whole screen. A beta update re-asks the
+permissions (the app is ad-hoc signed, so macOS sees each build as new).
+
 <details>
 <summary><b>Run from source instead</b> (Python 3.11)</summary>
 
@@ -202,6 +228,11 @@ powershell -ExecutionPolicy Bypass -File setup.ps1   # venv, dependencies, model
 
 To build the app and installer yourself: `packaging\build.ps1 -Out D:\CueBuild` (needs
 `pip install pyinstaller` and [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
+
+On a Mac: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`, put the
+[speaker model](https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx)
+in `models/`, then `.venv/bin/python -m cue`. Build the app and .dmg with
+`bash packaging/build-mac.sh` (GitHub Actions does this on every push: `.github/workflows/mac.yml`).
 
 </details>
 
@@ -347,6 +378,7 @@ Everything lives in `config.yaml`, and every option is commented. The usual knob
 
 - [x] **Windows installer**: a compiled app, no Python needed
 - [x] **Trainer mode**: coding-interview practice with a live spec, verified tests and debugging
+- [x] **macOS** (Apple Silicon, beta): a .dmg built by GitHub Actions
 - [ ] Trainer: a practice partner that plays the interviewer, with hints and a scorecard
 - [ ] First-run setup inside the app (name, teammates, workstreams) instead of editing files
 - [ ] Code-signed builds and auto-update
@@ -354,7 +386,6 @@ Everything lives in `config.yaml`, and every option is commented. The usual knob
 - [ ] Calendar awareness: know who's on the call and the agenda before it starts
 - [ ] Per-speaker transcription tuning that adapts to each accent over time
 - [ ] Send the follow-up email straight from the notes
-- [ ] macOS support
 
 ---
 
@@ -362,6 +393,7 @@ Everything lives in `config.yaml`, and every option is commented. The usual knob
 
 ```
 cue/          the app: audio, speech-to-text, speakers, triggers, LLM backends, panel, notes, practice
+cue/plat/     what differs between Windows and macOS (audio capture, hotkeys, windows, scheduling)
 cue/trainer/  trainer mode: problem state, model roles, test oracle, runner, windows, eval
 tools/vscode-cue-trainer/   the VS Code helper extension
 evals/trainer/  scripted mock interviews with gold answers (cue-cli trainer-eval)
@@ -369,10 +401,10 @@ tests/        pytest (python -m pytest tests)
 worklog/      the daily job: chat history + git + notes → daily notes → weekly → brief (+ fact-check) → history
 profiles/     your context (templates ship as *.example.md; your copies stay private)
 assets/       logo, icon, splash, installer art, screenshots (tools/ regenerates them)
-packaging/    PyInstaller spec + Inno Setup installer (build.ps1 builds both)
+packaging/    PyInstaller specs: Windows installer (build.ps1) and Mac .app/.dmg (build-mac.sh)
 ```
 
-Built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper),
+Built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper), [MLX Whisper](https://github.com/ml-explore/mlx-examples) (Mac),
 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) + WeSpeaker, [Ollama](https://ollama.com),
 PyQt6, and [Claude](https://claude.com).
 

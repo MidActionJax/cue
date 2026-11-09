@@ -6,8 +6,9 @@ Two places matter:
   ROOT     your data home: config.yaml, profiles/, meetings/, data/ (transcripts, logs, caches),
            models/ (Whisper downloads). Chosen by, in order:
              1. the CUE_HOME environment variable
-             2. a cue_home.txt file next to Cue.exe / in the repo, containing a folder path
-             3. the repo itself (running from source) or %USERPROFILE%\\Cue (installed app)
+             2. a cue_home.txt file containing a folder path: next to Cue.exe / in the repo, or
+                on macOS in ~/Library/Application Support/Cue/
+             3. the repo itself (running from source) or ~/Cue (installed app, both OSes)
 """
 from __future__ import annotations
 
@@ -23,10 +24,14 @@ APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
 EXE_DIR = Path(sys.executable).resolve().parent if FROZEN else APP_DIR
 
 
+MAC_SUPPORT = Path.home() / "Library" / "Application Support" / "Cue"
+
+
 def _find_home() -> Path:
     if os.environ.get("CUE_HOME"):
         return Path(os.environ["CUE_HOME"])
-    for d in (EXE_DIR, APP_DIR):
+    # macOS: files inside Cue.app can't be edited, so the pointer lives in Application Support
+    for d in (EXE_DIR, APP_DIR, MAC_SUPPORT) if sys.platform == "darwin" else (EXE_DIR, APP_DIR):
         pointer = d / "cue_home.txt"
         if pointer.exists():
             text = pointer.read_text(encoding="utf-8-sig").strip()  # the installer writes a BOM

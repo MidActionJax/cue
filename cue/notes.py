@@ -297,9 +297,11 @@ def _live_llm(prompt: str, cfg, llm_cfg) -> str:
 
 
 def spawn_detached(*args: str) -> None:
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
     from .cli import self_cmd, self_cwd
-    subprocess.Popen(self_cmd("notes", *args), cwd=self_cwd(), creationflags=flags, close_fds=True)
+    from .plat import popen_kwargs
+    # detached: finishing the notes outlives the app (no console window on Windows, own session on macOS)
+    subprocess.Popen(self_cmd("notes", *args), cwd=self_cwd(), close_fds=True, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **popen_kwargs(detached=True))
 
 
 def _mark_done(stamp: str) -> None:

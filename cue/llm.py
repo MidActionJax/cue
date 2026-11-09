@@ -322,21 +322,37 @@ class OllamaBackend(Backend):
             return True
         if "localhost" not in url and "127.0.0.1" not in url:
             return False
-        exe = shutil.which("ollama") or os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Ollama", "ollama.exe")
-        if not os.path.isfile(exe):
-            return False
-        log.info("Ollama isn't running; starting it for the local fallback")
-        flags = _NO_WINDOW | getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        breakaway = 0x01000000  # CREATE_BREAKAWAY_FROM_JOB: keep running after Cue exits
-        for extra in (breakaway, 0):  # breakaway is refused inside some job objects: then plain detached
+        from .plat import IS_MAC, IS_WIN
+        mac_app = "/Applications/Ollama.app"
+        exe = shutil.which("ollama") or (
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Ollama", "ollama.exe") if IS_WIN else "")
+        if IS_MAC and os.path.isdir(mac_app):
+            # the Mac app runs the server (and its menu-bar icon), like starting it by hand
+            log.info("Ollama isn't running; opening Ollama.app for the local fallback")
             try:
-                subprocess.Popen([exe, "serve"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL, creationflags=flags | extra, close_fds=True)
-                break
+                subprocess.Popen(["open", "-g", "-a", mac_app])
             except OSError as e:
-                if not extra:
-                    log.warning("couldn't start Ollama: %s", e)
-                    return False
+                log.warning("couldn't open Ollama: %s", e)
+                return False
+        elif not exe or not os.path.isfile(exe):
+            return False
+        else:
+            log.info("Ollama isn't running; starting it for the local fallback")
+            if IS_WIN:
+                flags = _NO_WINDOW | getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                breakaway = 0x01000000  # CREATE_BREAKAWAY_FROM_JOB: keep running after Cue exits
+                tries = [{"creationflags": flags | breakaway}, {"creationflags": flags}]
+            else:
+                tries = [{"start_new_session": True}]
+            for i, kw in enumerate(tries):  # breakaway is refused inside some job objects: then plain detached
+                try:
+                    subprocess.Popen([exe, "serve"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL, close_fds=True, **kw)
+                    break
+                except OSError as e:
+                    if i == len(tries) - 1:
+                        log.warning("couldn't start Ollama: %s", e)
+                        return False
         end = time.time() + wait_s
         while time.time() < end:
             if OllamaBackend.available(url):

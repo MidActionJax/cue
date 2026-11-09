@@ -1,0 +1,102 @@
+name: macOS build
+
+# Tests Cue on Apple Silicon and builds Cue.app + the .dmg. Runs on pushes to the Mac branch and
+# main, by hand, and on version tags (v*), where the .dmg is attached to the GitHub release.
+on:
+  push:
+    branches: [main, mac-port]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # attach the .dmg to the release on a tag
+
+jobs:
+  mac:
+    runs-on: macos-14   # Apple Silicon (M1)
+    timeout-minutes: 60
+    env:
+      QT_QPA_PLATFORM: offscreen
+      CUE_HOME: ${{ github.workspace }}/ci-home
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller pytest
+
+      - name: Speaker model
+        run: |
+          mkdir -p models
+          curl -sSL -o models/wespeaker_en_voxceleb_resnet34_LM.onnx \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx
+
+      - name: Imports
+        run: |
+          python - <<'EOF'
+          import cue.app, cue.overlay, cue.stt, cue.accurate, cue.notes, cue.practice, cue.llm
+          import cue.plat.audio_mac, cue.plat.window, cue.plat.hotkeys, cue.plat.schedule
+          from cue.plat.audio_mac import _output_class
+          import objc, ScreenCaptureKit, CoreMedia
+          _output_class()   # the ScreenCaptureKit audio receiver class can be defined
+          import mlx.core as mx, mlx_whisper, sounddevice, pynput.keyboard
+          print("imports ok; mlx device:", mx.default_device())
+          EOF
+
+      - name: Tests
+        run: python -m pytest -q tests
+
+      - name: Whisper on MLX (tiny model, one clip)
+        run: |
+          say -o /tmp/q.aiff "Where are we with the data pipeline?"
+          afconvert -f WAVE -d LEI16@16000 -c 1 /tmp/q.aiff /tmp/q.wav
+          python - <<'EOF'
+          import wave, numpy as np
+          from cue import asr
+          with wave.open("/tmp/q.wav") as w:
+              audio = np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768
+          segs, info = asr.load("tiny.en").transcribe(audio, language="en", word_timestamps=True)
+          text = " ".join(s.text for s in segs)
+          print("heard:", text)
+          assert "pipeline" in text.lower(), text
+          EOF
+
+      - name: Build Cue.app and .dmg
+        run: bash packaging/build-mac.sh "$RUNNER_TEMP/out"
+
+      - name: Smoke test the built app
+        run: |
+          APP="$RUNNER_TEMP/out/dist/Cue.app/Contents/MacOS/Cue"
+          "$APP" devices || true
+          "$APP" --demo --mode work > "$RUNNER_TEMP/demo.log" 2>&1 &
+          PID=$!
+          sleep 25
+          kill -TERM $PID || true
+          sleep 3
+          kill -9 $PID 2>/dev/null || true
+          cat "$RUNNER_TEMP/demo.log" | tail -40
+          LOG=$(ls -t ci-home/data/logs/app-*.log | head -1)
+          tail -40 "$LOG"
+          ! grep -q "uncaught error" "$LOG"
+          test -s "$LOG"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cue-mac-arm64
+          path: ${{ runner.temp }}/out/Cue-*-mac-arm64.dmg
+          retention-days: 14
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || sleep 60
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/out/Cue-*-mac-arm64.dmg --clobber

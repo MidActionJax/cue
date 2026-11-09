@@ -71,13 +71,12 @@ def run(stamp: str, cfg, meta: dict, live: str, mode: str) -> str | None:
 # ------------------------------------------------------------------ transcription
 def transcribe(audio: np.ndarray, cfg, mode: str) -> list[tuple[float, float, str]]:
     """[(start_s, end_s, text)], split at pauses so a passage is (almost always) one speaker."""
-    from faster_whisper import WhisperModel
-
+    from . import asr
     from .context import load_vocabulary
     from .stt import _HALLUCINATIONS, _has_words
 
     model_name = (cfg.notes.get("accurate_model") or "large-v3")
-    model = WhisperModel(model_name, device=cfg.stt.device, compute_type=cfg.stt.compute_type)
+    model = asr.load(model_name, cfg.stt.device, cfg.stt.compute_type)
     vocab = load_vocabulary(cfg.stt.vocabulary, mode)[:60]
     segments, _info = model.transcribe(
         audio, language=cfg.stt.language or None, beam_size=5,

@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.5.0-beta (2026-11-09): Cue on the Mac
+
+### New: macOS (Apple Silicon)
+- **Cue for Mac**: `Cue-0.5.0-beta-mac-arm64.dmg` (M1 or newer, macOS 13+). Drag Cue into
+  Applications; the first open is right-click → Open (the app isn't notarized yet).
+- **Hears the call without extra software**: the other side comes from macOS's own system-audio
+  capture (ScreenCaptureKit). No virtual audio device needed, though a loopback input like
+  BlackHole can still be picked from the Them light. Cue's own sounds are left out.
+- **Transcription on the Mac's GPU** with MLX Whisper (same models, same settings).
+- The floating panel never takes focus from your meeting or editor. It stays above full-screen
+  apps and on every Space, and `Tab` and the other shortcuts work globally.
+- The **daily 7:30 brief** is a launchd agent the app sets up itself (`worklog: daily_job: false`
+  turns it off). Practice mode reads questions out with the Mac's voice.
+- **Trainer mode on the Mac**: Homebrew and Xcode toolchains are found. C++ gets `<bits/stdc++.h>`
+  even with Apple's clang, timed-out runs are killed with their whole process group, and VS Code
+  is found even without the `code` command installed.
+- The worklog also reads Claude desktop (Cowork) sessions from their Mac location.
+- Permissions to grant (then reopen Cue): Microphone, Screen & System Audio Recording,
+  Accessibility. See the README.
+
+### Under the hood
+- Everything OS-specific now lives in `cue/plat/` (audio backends, hotkeys, window styling,
+  shutdown handling, scheduling). The rest of Cue is shared by both platforms.
+- `requirements.txt` uses platform markers, so one file installs the right packages on each OS.
+- GitHub Actions builds and tests the Mac app on every push (`.github/workflows/mac.yml`) and
+  attaches the .dmg to tagged releases.
+
+### Known limits on the Mac (beta)
+- Hiding the panel from screen sharing works where macOS allows it. macOS 15's capture can still
+  show it, so check before sharing your whole screen.
+- Switching your default mic mid-call isn't followed automatically; pick it from the Me light.
+- Each new beta build asks for the permissions again (ad-hoc signed builds look new to macOS).
+
 ## 0.4.0-beta (2026-10-28): Trainer mode
 
 ### New: Trainer mode, for coding-interview rounds

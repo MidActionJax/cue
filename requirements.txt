@@ -1,8 +1,6 @@
 faster-whisper
-pyaudiowpatch
 webrtcvad-wheels
 PyQt6
-keyboard
 anthropic
 httpx
 numpy
@@ -11,8 +9,24 @@ pyyaml
 pypdf
 openpyxl              # SBIR mode: reads your tracker spreadsheets (read-only)
 pygments              # Trainer mode: syntax highlighting for every language
-nvidia-cublas-cu12
-nvidia-cudnn-cu12==9.*
 sherpa-onnx
-pycaw
-comtypes
+
+# Windows: WASAPI audio, global hotkeys, default-device tracking, speech, Whisper on the GPU
+pyaudiowpatch; sys_platform == "win32"
+keyboard; sys_platform == "win32"
+pycaw; sys_platform == "win32"
+comtypes; sys_platform == "win32"
+nvidia-cublas-cu12; sys_platform == "win32"
+nvidia-cudnn-cu12==9.*; sys_platform == "win32"
+
+# macOS (Apple Silicon): Whisper on the Apple GPU, mic input, global hotkeys, system audio
+# capture (ScreenCaptureKit) and the floating panel (AppKit)
+mlx-whisper; sys_platform == "darwin"
+sounddevice; sys_platform == "darwin"
+pynput; sys_platform == "darwin"
+pyobjc-core; sys_platform == "darwin"
+pyobjc-framework-Cocoa; sys_platform == "darwin"
+pyobjc-framework-Quartz; sys_platform == "darwin"
+pyobjc-framework-ApplicationServices; sys_platform == "darwin"
+pyobjc-framework-CoreMedia; sys_platform == "darwin"
+pyobjc-framework-ScreenCaptureKit; sys_platform == "darwin"

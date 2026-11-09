@@ -1,6 +1,6 @@
 """Compile and run code in a throwaway folder, with a time limit, a memory cap and the whole
-process tree killed on timeout (a Windows Job Object), and output capped so a print loop can't
-eat memory.
+process tree killed on timeout (a Job Object on Windows, a process group on macOS), and output
+capped so a print loop can't eat memory.
 """
 from __future__ import annotations
 
@@ -9,10 +9,11 @@ import hashlib
 import logging
 import os
 import shutil
+import signal
 import subprocess
+import sys
 import threading
 import time
-from ctypes import wintypes
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,7 +21,9 @@ from ..config import DATA
 from . import langs
 
 log = logging.getLogger(__name__)
+IS_WIN = sys.platform == "win32"
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+EXE = "prog.exe" if IS_WIN else "prog"
 WORK = DATA / "trainer" / "build"
 MAX_OUT = 16 * 1024 * 1024        # a 10^5-element answer is ~1 MB of JSON
 MARK = "@@CUE_RESULT@@"
@@ -51,34 +54,52 @@ class RunResult:
 
 # ---------------------------------------------------------------------------- job objects
 
-class _IO(ctypes.Structure):
-    _fields_ = [(n, ctypes.c_ulonglong) for n in ("r", "w", "o", "rt", "wt", "ot")]
-
-
-class _BASIC(ctypes.Structure):
-    _fields_ = [("PerProcessUserTimeLimit", ctypes.c_longlong), ("PerJobUserTimeLimit", ctypes.c_longlong),
-                ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
-                ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
-                ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD), ("SchedulingClass", wintypes.DWORD)]
-
-
-class _EXTENDED(ctypes.Structure):
-    _fields_ = [("Basic", _BASIC), ("Io", _IO), ("ProcessMemoryLimit", ctypes.c_size_t),
-                ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t),
-                ("PeakJobMemoryUsed", ctypes.c_size_t)]
-
-
-_k32 = ctypes.windll.kernel32
-_k32.CreateJobObjectW.restype = wintypes.HANDLE
-_k32.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
-_k32.SetInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD)
-_k32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
-_k32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
-_k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+_k32 = None
 KILL_ON_CLOSE, PROCESS_MEMORY = 0x2000, 0x100
+
+if IS_WIN:
+    from ctypes import wintypes
+
+    class _IO(ctypes.Structure):
+        _fields_ = [(n, ctypes.c_ulonglong) for n in ("r", "w", "o", "rt", "wt", "ot")]
+
+    class _BASIC(ctypes.Structure):
+        _fields_ = [("PerProcessUserTimeLimit", ctypes.c_longlong), ("PerJobUserTimeLimit", ctypes.c_longlong),
+                    ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                    ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                    ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD), ("SchedulingClass", wintypes.DWORD)]
+
+    class _EXTENDED(ctypes.Structure):
+        _fields_ = [("Basic", _BASIC), ("Io", _IO), ("ProcessMemoryLimit", ctypes.c_size_t),
+                    ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                    ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+    _k32 = ctypes.windll.kernel32
+    _k32.CreateJobObjectW.restype = wintypes.HANDLE
+    _k32.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
+    _k32.SetInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD)
+    _k32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    _k32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    _k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+
+
+def _kill_tree(p: subprocess.Popen, job) -> None:
+    if job:
+        _k32.TerminateJobObject(job, 1)
+    elif IS_WIN:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], capture_output=True, creationflags=_NO_WINDOW)
+    else:
+        try:   # the child leads its own process group (start_new_session), so this takes its children too
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
 
 
 def _job(mem_mb: int) -> int | None:
+    """Windows only: a Job Object that caps memory and kills the whole tree when closed. (macOS
+    doesn't enforce RLIMIT_AS, so there the time limit is the guard against runaway code.)"""
+    if not IS_WIN:
+        return None
     try:
         job = _k32.CreateJobObjectW(None, None)
         if not job:
@@ -112,8 +133,9 @@ def run(cmd: list[str], cwd: Path | str, stdin: str = "", timeout: float = 5.0, 
     e = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1", PYTHONDONTWRITEBYTECODE="1")
     e.update(env or {})
     try:
+        extra = {"creationflags": _NO_WINDOW} if IS_WIN else {"start_new_session": True}
         p = subprocess.Popen(cmd, cwd=str(cwd), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, creationflags=_NO_WINDOW, env=e)
+                             stderr=subprocess.PIPE, env=e, **extra)
     except OSError as ex:
         return RunResult(False, None, "", "", 0.0, error=f"couldn't start {Path(cmd[0]).name}: {ex}")
     job = _job(mem_mb)
@@ -135,10 +157,7 @@ def run(cmd: list[str], cwd: Path | str, stdin: str = "", timeout: float = 5.0, 
         p.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
-        if job:
-            _k32.TerminateJobObject(job, 1)
-        else:
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], capture_output=True, creationflags=_NO_WINDOW)
+        _kill_tree(p, job)
         try:
             p.wait(timeout=3)
         except subprocess.TimeoutExpired:
@@ -170,7 +189,7 @@ def _fill(cmd: list[str], d: Path, main: Path, src: Path, files: list[Path]) -> 
         if part == "{files}":
             out += [str(f) for f in files]
             continue
-        out.append(part.replace("{exe}", str(d / "prog.exe")).replace("{main}", str(main))
+        out.append(part.replace("{exe}", str(d / EXE)).replace("{main}", str(main))
                    .replace("{src}", str(src)).replace("{harness}", str(main)).replace("{dir}", str(d)))
     return out
 
@@ -212,6 +231,7 @@ def prepare(lang: langs.Language, code: str, harness: str | None, user_path: str
             main.write_text(harness, encoding="utf-8")
     if lang.key == "csharp":
         _csproj(d)
+    langs.prepare_dir(lang, d)
     files = _sources(d)
     if harness is not None and lang.wiring == "append":
         files = [main]
@@ -232,7 +252,7 @@ def prepare(lang: langs.Language, code: str, harness: str | None, user_path: str
 
 
 def _sources(d: Path) -> list[Path]:
-    return sorted(p for p in d.iterdir() if p.is_file() and not p.name.startswith(".")
+    return sorted(p for p in d.iterdir() if p.is_file() and not p.name.startswith(".") and p.name != EXE
                   and p.suffix not in (".exe", ".pdb", ".obj", ".o", ".csproj", ".jar", ".rmeta", ".class"))
 
 
@@ -267,6 +287,7 @@ def syntax_check(lang: langs.Language, code: str, user_path: str = "") -> list[d
     d = WORK / f"check-{lang.key}"
     d.mkdir(parents=True, exist_ok=True)
     (d / "check").mkdir(exist_ok=True)
+    langs.prepare_dir(lang, d)
     src = d / lang.user_name(code)
     for old in d.glob("*" + lang.ext):
         if old != src:

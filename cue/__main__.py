@@ -6,8 +6,10 @@ import sys
 import time
 
 from .cuda_setup import add_cuda_dlls
+from .plat import fix_path
 
-add_cuda_dlls()
+add_cuda_dlls()   # Windows: the pip-installed CUDA libraries
+fix_path()        # macOS: a Finder-launched app needs the shell's PATH (claude, ollama, git)
 
 from PyQt6.QtCore import QTimer  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
@@ -26,9 +28,6 @@ DEMO = {
         ("them", "Also, could we put you on our website as a partner?"),
     ],
 }
-
-
-_handler_ref = None
 
 
 def _splash():
@@ -66,27 +65,6 @@ def _log_crashes(logs) -> None:
         pass
 
 
-def _on_console_close(save) -> None:
-    """Closing the console window (its X) kills the process ~5 s later without any Qt event.
-    Catch it so the call's notes and learning still get saved."""
-    global _handler_ref
-    import ctypes
-    from ctypes import wintypes
-
-    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
-    def handler(event):
-        if event in (0, 1, 2, 5, 6):  # Ctrl+C, Ctrl+Break, close, logoff, shutdown
-            logging.getLogger(__name__).info("console closing (event %d) — saving the call", event)
-            try:
-                save()
-            finally:
-                _hard_exit(0)
-        return False
-
-    _handler_ref = handler  # must stay referenced or ctypes frees it
-    ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True)
-
-
 def main():
     ap = argparse.ArgumentParser(prog="cue")
     ap.add_argument("--devices", action="store_true", help="list audio devices and exit")
@@ -117,9 +95,18 @@ def main():
         return
 
     cfg = config.load()
-    # its own taskbar identity (icon + grouping) instead of "python.exe"
-    import ctypes
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("MidActionJax.Cue")
+    from . import plat
+    plat.set_app_identity()   # Windows: its own taskbar button and icon instead of python.exe's
+    if plat.IS_MAC and not args.demo:
+        import threading
+
+        def _schedule():
+            from .plat.schedule import sync_daily_job
+            try:
+                sync_daily_job(bool(cfg.get("worklog", {}).get("daily_job", True)))
+            except Exception:
+                logging.getLogger(__name__).exception("daily job")
+        threading.Thread(target=_schedule, name="schedule", daemon=True).start()
     app = QApplication(sys.argv)
     from .instance import InstanceServer, send_to_running
     if send_to_running("quit" if args.quit else "show"):
@@ -135,7 +122,10 @@ def main():
     ctl = Controller(cfg, audio=not args.demo, mode=args.mode)
     if splash:
         QTimer.singleShot(1200, lambda: splash.finish(ctl.overlay))
-    _on_console_close(ctl.shutdown)
+    plat.on_shutdown(ctl.shutdown)   # console closed / logoff (Windows), SIGTERM / SIGHUP (macOS)
+    if not plat.IS_WIN:   # Python only runs signal handlers between bytecodes: let it in regularly
+        _tick = QTimer(app, interval=500, timeout=lambda: None)
+        _tick.start()
     instance = InstanceServer()
     def on_message(msg: str):
         logging.getLogger(__name__).info("another launch asked: %s", msg or "show")
@@ -196,18 +186,8 @@ def _replay_trainer(ctl, args) -> None:
 
 
 def _hard_exit(code: int) -> None:
-    """Everything is saved by now. Skip interpreter teardown (audio/STT threads are daemons) and
-    DLL unload too: os._exit's ExitProcess can hang in the CUDA/ONNX libraries' unload handlers
-    while a worker thread is mid-inference."""
-    logging.shutdown()
-    sys.stdout and sys.stdout.flush()
-    import ctypes
-    from ctypes import wintypes
-    k32 = ctypes.windll.kernel32
-    k32.GetCurrentProcess.restype = wintypes.HANDLE
-    k32.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
-    k32.TerminateProcess(k32.GetCurrentProcess(), code)
-    os._exit(code)
+    from .plat import hard_exit
+    hard_exit(code)
 
 
 if __name__ == "__main__":

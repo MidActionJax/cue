@@ -1,8 +1,13 @@
-"""Audio capture (WASAPI loopback + mic) and VAD-based utterance segmentation.
+"""Audio capture (call audio + mic) and VAD-based utterance segmentation.
 
 Both sources are normalized to 16 kHz mono int16 in 30 ms frames, which is what both
 webrtcvad and Whisper want. Each source gets its own Segmenter that turns frames into
 utterances and reports speaking/silent state changes.
+
+Where the audio comes from is per OS (cue/plat/audio_win.py, audio_mac.py):
+    Windows  call audio = WASAPI loopback of the output device; mic = WASAPI input
+    macOS    call audio = ScreenCaptureKit system audio (or an input device like BlackHole);
+             mic = CoreAudio input via PortAudio
 """
 from __future__ import annotations
 
@@ -14,7 +19,6 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 import numpy as np
-import pyaudiowpatch as pyaudio
 import soxr
 import webrtcvad
 
@@ -25,88 +29,43 @@ FRAME_MS = 30
 FRAME = SR * FRAME_MS // 1000  # 480 samples
 
 
-def _wasapi_inputs(p: pyaudio.PyAudio, loopback: bool) -> list[dict]:
-    wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)["index"]
-    devs = p.get_loopback_device_info_generator() if loopback else \
-        (p.get_device_info_by_index(i) for i in range(p.get_device_count()))
-    return [d for d in devs if d["hostApi"] == wasapi and d["maxInputChannels"] > 0
-            and bool(d.get("isLoopbackDevice")) == loopback]
-
-
-def _find_device(p: pyaudio.PyAudio, want: str, loopback: bool) -> dict:
-    if want and want != "default":
-        for dev in _wasapi_inputs(p, loopback):
-            if want.lower() in dev["name"].lower():
-                return dev
-        log.warning("device %r not found, using default", want)
-    if loopback:
-        return p.get_default_wasapi_loopback()
-    wasapi = p.get_host_api_info_by_type(pyaudio.paWASAPI)
-    return p.get_device_info_by_index(wasapi["defaultInputDevice"])
-
-
-def default_endpoint_names() -> tuple[str, str]:
-    """Windows' current default output and input device names (they change when you plug in a
-    headset). Needs COM initialized on the calling thread."""
-    from pycaw.pycaw import AudioUtilities
-
-    def name(dev):
-        return getattr(dev, "FriendlyName", None) or AudioUtilities.CreateDevice(dev).FriendlyName
-
-    return name(AudioUtilities.GetSpeakers()), name(AudioUtilities.GetMicrophone())
+def _backend():
+    from .plat import IS_MAC
+    if IS_MAC:
+        from .plat.audio_mac import MacBackend
+        return MacBackend()
+    from .plat.audio_win import WinBackend
+    return WinBackend()
 
 
 def list_devices() -> None:
-    p = pyaudio.PyAudio()
-    try:
-        print("Call audio / loopback (what you hear):")
-        for d in _wasapi_inputs(p, True):
-            print(f"  {d['name']}")
-        print("Microphones:")
-        for d in _wasapi_inputs(p, False):
-            print(f"  {d['name']}")
-        print("Default loopback:", p.get_default_wasapi_loopback()["name"])
-    finally:
-        p.terminate()
+    _backend().list_devices()
 
 
 class Capture:
-    """Streams one device into a queue of 16 kHz int16 frames. Reopenable: the queue (and so
-    the Segmenter reading it) survives device switches."""
+    """One source as a queue of 16 kHz int16 frames. A backend opens the device, calls begin()
+    with its sample rate, then feeds ingest() from its audio callback. Reopenable: the queue (and
+    so the Segmenter reading it) survives device switches."""
 
     def __init__(self, name: str, loopback: bool):
         self.name, self.loopback = name, loopback
         self.frames: queue.Queue[tuple[float, np.ndarray]] = queue.Queue(maxsize=2000)
-        self._stream = None
+        self.handle = None        # the backend's open stream: alive() / close()
         self._pending = np.zeros(0, dtype=np.int16)
+        self._resampler = None
         self.device_name = "none"
         self.level = 0.0          # RMS of the latest chunk (for the level indicator)
         self.last_frame = 0.0     # monotonic time audio last arrived
 
-    def open(self, pa: pyaudio.PyAudio, dev: dict) -> None:
-        self.device_name = dev["name"]
-        rate = int(dev["defaultSampleRate"])
-        self._channels = max(1, min(2, int(dev["maxInputChannels"])))
+    def begin(self, rate: int) -> None:
         self._resampler = soxr.ResampleStream(rate, SR, 1, dtype="float32", quality="HQ")
         self._pending = np.zeros(0, dtype=np.int16)
-        self._stream = pa.open(
-            format=pyaudio.paFloat32, channels=self._channels, rate=rate, input=True,
-            input_device_index=dev["index"], frames_per_buffer=int(rate * 0.02),
-            stream_callback=self._callback,
-        )
-        log.info("%s capture: %s (%d Hz, %d ch)", self.name, self.device_name, rate, self._channels)
 
-    def alive(self) -> bool:
-        try:
-            return self._stream is not None and self._stream.is_active()
-        except Exception:
-            return False
-
-    def _callback(self, data, frame_count, time_info, status):
-        audio = np.frombuffer(data, dtype=np.float32)
-        if self._channels > 1:
-            audio = audio.reshape(-1, self._channels).mean(axis=1)
-        audio = self._resampler.resample_chunk(audio)
+    def ingest(self, audio: np.ndarray) -> None:
+        """float32 mono at the device's rate (from the backend's audio callback)."""
+        if self._resampler is None:
+            return
+        audio = self._resampler.resample_chunk(np.ascontiguousarray(audio, dtype=np.float32))
         now = time.monotonic()
         if len(audio):
             self.level = float(np.sqrt(np.mean(audio ** 2)))
@@ -120,27 +79,31 @@ class Capture:
             except queue.Full:
                 pass
         self._pending = buf[n * FRAME:]
-        return (None, pyaudio.paContinue)
+
+    def alive(self) -> bool:
+        try:
+            return self.handle is not None and self.handle.alive()
+        except Exception:
+            return False
 
     def close(self) -> None:
         try:
-            if self._stream:
-                self._stream.stop_stream()
-                self._stream.close()
+            if self.handle:
+                self.handle.close()
         except Exception:
             pass
-        self._stream = None
+        self.handle = None
 
 
 class AudioManager:
     """Owns both captures. Reopens them when a stream dies or, for devices set to "default",
-    when Windows switches the default device (headset plugged in / unplugged mid-call)."""
+    when the OS switches the default device (headset plugged in / unplugged mid-call)."""
 
     def __init__(self, loopback: str = "default", mic: str = "default"):
         self.want = {"them": loopback or "default", "me": mic or "default"}
         self.them = Capture("them", loopback=True)
         self.me = Capture("me", loopback=False)
-        self._pa: pyaudio.PyAudio | None = None
+        self.backend = _backend()
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self.on_change: Callable[[str], None] | None = None
@@ -150,12 +113,13 @@ class AudioManager:
         threading.Thread(target=self._watch, name="audio-watch", daemon=True).start()
 
     def _open(self) -> None:
-        self._pa = pyaudio.PyAudio()
+        self.backend.start()
         for cap in (self.them, self.me):
             try:
-                cap.open(self._pa, _find_device(self._pa, self.want[cap.name], cap.loopback))
+                cap.handle = self.backend.open(cap, self.want[cap.name])
             except Exception as e:
-                cap.device_name = "unavailable"
+                if cap.device_name in ("none", ""):
+                    cap.device_name = "unavailable"
                 log.error("could not open %s audio: %s", cap.name, e)
 
     def restart(self, reason: str) -> None:
@@ -163,8 +127,7 @@ class AudioManager:
             log.info("reopening audio devices (%s)", reason)
             for cap in (self.them, self.me):
                 cap.close()
-            if self._pa:
-                self._pa.terminate()  # PortAudio only re-scans devices after a full terminate
+            self.backend.stop()  # PortAudio only re-scans devices after a full terminate
             self._open()
         if self.on_change:
             self.on_change(reason)
@@ -174,29 +137,23 @@ class AudioManager:
         self.restart(f"{source} device -> {name}")
 
     def devices(self) -> tuple[list[str], list[str]]:
+        """(call-audio choices, microphones), by name."""
         with self._lock:
-            if not self._pa:
-                return [], []
-            return ([d["name"] for d in _wasapi_inputs(self._pa, True)],
-                    [d["name"] for d in _wasapi_inputs(self._pa, False)])
+            return self.backend.devices()
 
     def _watch(self) -> None:
-        try:
-            import comtypes
-            comtypes.CoInitialize()
-        except Exception:
-            pass
+        self.backend.watch_init()
         while not self._stop.wait(3):
             try:
-                dead = [c.name for c in (self.them, self.me) if c.device_name != "unavailable" and not c.alive()]
+                dead = [c.name for c in (self.them, self.me) if c.handle is not None and not c.alive()]
                 if dead:
                     self.restart(f"{', '.join(dead)} stream stopped")
                     continue
                 if "default" in self.want.values():
-                    out_dev, in_dev = default_endpoint_names()
-                    if (self.want["them"] == "default" and not self.them.device_name.startswith(out_dev)) or \
-                       (self.want["me"] == "default" and not self.me.device_name.startswith(in_dev)):
-                        self.restart(f"Windows default changed -> {out_dev} / {in_dev}")
+                    out_dev, in_dev = self.backend.defaults()
+                    if (out_dev and self.want["them"] == "default" and not self.them.device_name.startswith(out_dev)) or \
+                       (in_dev and self.want["me"] == "default" and not self.me.device_name.startswith(in_dev)):
+                        self.restart(f"default device changed -> {out_dev} / {in_dev}")
             except Exception as e:
                 log.debug("audio watch: %s", e)
 
@@ -205,8 +162,7 @@ class AudioManager:
         with self._lock:
             for cap in (self.them, self.me):
                 cap.close()
-            if self._pa:
-                self._pa.terminate()
+            self.backend.stop()
 
 
 class CallRecorder:

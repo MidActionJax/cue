@@ -85,24 +85,15 @@ def question_bank(kind: str) -> list[str]:
 
 
 class Voice:
-    """Windows' built-in text-to-speech (SAPI) for reading questions out loud."""
-
-    def __init__(self):
-        try:
-            import comtypes.client
-            self._v = comtypes.client.CreateObject("SAPI.SpVoice")
-            self._v.Rate = 0
-        except Exception as e:
-            log.warning("text-to-speech unavailable: %s", e)
-            self._v = None
+    """The system's text-to-speech (SAPI on Windows, `say` on macOS) for reading questions out loud."""
 
     def say(self, text: str) -> None:
-        if self._v:
-            self._v.Speak(text, 1 | 2)  # async + purge anything still being spoken
+        from .plat import say
+        say(text)   # async, cutting off anything still being spoken
 
     def stop(self) -> None:
-        if self._v:
-            self._v.Speak("", 2)
+        from .plat import stop_saying
+        stop_saying()
 
 
 class PracticeSession:

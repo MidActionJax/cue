@@ -1,6 +1,6 @@
 """Compare Whisper models on a real recording of a hard-to-understand speaker.
 
-    accent_test.cmd meeting.mp4                      # any audio/video file (Teams/Zoom recordings work)
+    cue-cli accent-test meeting.mp4                  # any audio/video file (Teams/Zoom recordings work)
     accent_test.cmd meeting.mp4 --start 300 --length 60
     accent_test.cmd --record 60                      # capture 60 s of call audio (what you hear) first
 
@@ -29,9 +29,10 @@ DEFAULT_MODELS = ["large-v3-turbo", "large-v3", "medium"]
 
 
 def record(seconds: int, device: str) -> str:
-    from .audio import SR, Capture
-    cap = Capture("them", device, loopback=True)
-    cap.start()
+    from .audio import SR, AudioManager
+    mgr = AudioManager(device, "default")
+    mgr.start()
+    cap = mgr.them
     print(f"Recording {seconds}s of call audio from {cap.device_name} …")
     frames, t0 = [], time.time()
     while time.time() - t0 < seconds:
@@ -39,7 +40,7 @@ def record(seconds: int, device: str) -> str:
             frames.append(cap.frames.get(timeout=0.2)[1])
         except Exception:
             pass
-    cap.stop()
+    mgr.stop()
     out = config.DATA / "recordings" / f"{datetime.now():%Y-%m-%d_%H%M%S}.wav"
     out.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(out), "wb") as w:
@@ -64,8 +65,9 @@ def main():
     if not path:
         ap.error("give a file or --record SECONDS")
 
-    from faster_whisper import WhisperModel
     from faster_whisper.audio import decode_audio
+
+    from . import asr
 
     audio = decode_audio(path, sampling_rate=16000)
     audio = _normalize(audio[int(args.start * 16000): int((args.start + args.length) * 16000)])
@@ -74,7 +76,7 @@ def main():
     report = [f"# Accent test — {path} ({dur:.0f}s from {args.start:.0f}s)\n"]
     for name in args.models:
         print(f"\n=== {name} (loading…)", flush=True)
-        model = WhisperModel(name, device=cfg.stt.device, compute_type=cfg.stt.compute_type)
+        model = asr.load(name, cfg.stt.device, cfg.stt.compute_type)
         t = time.time()
         segs, _ = model.transcribe(audio, language=cfg.stt.language or None, beam_size=cfg.stt.beam_size,
                                    initial_prompt=f"Glossary: {vocab}." if vocab else None,

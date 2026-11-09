@@ -31,3 +31,4 @@ models/
 # your documents stay private; only the README ships
 profiles/docs/*
 !profiles/docs/README.md
+build-mac/

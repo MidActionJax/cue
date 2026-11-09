@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import QApplication, QInputDialog, QMenu, QSystemTrayIcon
 from . import docs as doclib
 from . import prompts
 from .cli import self_cmd, self_cwd
+from .plat import open_path
 from .config import ASSETS, ROOT, resolve
 from .context import load_context, load_vocabulary
 from .llm import ClaudeCLIBackend, OllamaBackend, make_backend, make_local
@@ -370,7 +371,12 @@ class Controller(QObject):
         menu.clear()
         loopbacks, mics = self.audio.devices() if self.audio else ([], [])
         current = self.audio.want[source] if self.audio else "default"
-        options = [("default", "Windows default (follows headset plug/unplug)")] + \
+        from .plat import IS_MAC
+        if IS_MAC:
+            from .plat.audio_mac import DEFAULT_LABELS
+        else:
+            from .plat.audio_win import DEFAULT_LABELS
+        options = [("default", DEFAULT_LABELS[0 if source == "them" else 1])] + \
                   [(d.replace(" [Loopback]", ""), _short(d)) for d in (loopbacks if source == "them" else mics)]
         for value, label in options:
             a = menu.addAction(label)
@@ -385,29 +391,30 @@ class Controller(QObject):
         threading.Thread(target=self.audio.set_device, args=(source, value), daemon=True).start()
 
     def _register_hotkeys(self):
-        import keyboard
+        from .plat.hotkeys import Hotkeys
+        self._keys = Hotkeys()
         for action, combo in self.cfg.hotkeys.items():
-            # suppress=False: the key still reaches whatever app you're in
-            self._hotkeys[action] = keyboard.add_hotkey(combo, lambda a=action: self.bridge.hotkey.emit(a), suppress=False)
+            try:  # the key still reaches whatever app you're in
+                self._hotkeys[action] = self._keys.add(combo, lambda a=action: self.bridge.hotkey.emit(a))
+            except Exception:
+                log.exception("hotkey %s (%s) unavailable", action, combo)
 
     def _trainer_hotkeys(self, on: bool):
         """Trainer mode swaps Tab / Shift+Tab (which indent code) for its own keys, and back."""
-        import keyboard
+        keys = self._keys
         try:
             for action in ("answer", "explain"):
                 if on and action in self._hotkeys:
-                    keyboard.remove_hotkey(self._hotkeys.pop(action))
+                    keys.remove(self._hotkeys.pop(action))
                 elif not on and action not in self._hotkeys and action in self.cfg.hotkeys:
-                    self._hotkeys[action] = keyboard.add_hotkey(
-                        self.cfg.hotkeys[action], lambda a=action: self.bridge.hotkey.emit(a), suppress=False)
+                    self._hotkeys[action] = keys.add(self.cfg.hotkeys[action], lambda a=action: self.bridge.hotkey.emit(a))
             if on:
                 for action, combo in ((self.cfg.get("trainer") or {}).get("hotkeys") or {}).items():
                     if action not in self._trainer_keys and combo:
-                        self._trainer_keys[action] = keyboard.add_hotkey(
-                            combo, lambda a=action: self.bridge.hotkey.emit(f"trainer_{a}"), suppress=False)
+                        self._trainer_keys[action] = keys.add(combo, lambda a=action: self.bridge.hotkey.emit(f"trainer_{a}"))
             else:
                 for handle in self._trainer_keys.values():
-                    keyboard.remove_hotkey(handle)
+                    keys.remove(handle)
                 self._trainer_keys = {}
         except Exception:
             log.exception("couldn't switch hotkeys for trainer mode")
@@ -1012,13 +1019,13 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
         menu.addAction("Build interview prep", self.build_interview_prep)
         if "sbir" in self.cfg.modes:
             menu.addAction("Prep SBIR call…", self.build_sbir_prep)
-        menu.addAction("Open meeting notes folder", lambda: os.startfile(ROOT / "meetings")
+        menu.addAction("Open meeting notes folder", lambda: open_path(ROOT / "meetings")
                        if (ROOT / "meetings").exists() else self.overlay.show_status("No meeting notes yet", 2000))
-        menu.addAction("Open trainer sessions", lambda: os.startfile(ROOT / "trainer")
+        menu.addAction("Open trainer sessions", lambda: open_path(ROOT / "trainer")
                        if (ROOT / "trainer").exists() else self.overlay.show_status("No trainer sessions yet", 2000))
-        menu.addAction("Open profiles folder", lambda: os.startfile(resolve("profiles")))
-        menu.addAction("Open app log", lambda: os.startfile(ROOT / "data" / "logs"))
-        menu.addAction("Edit config", lambda: os.startfile(ROOT / "config.yaml"))
+        menu.addAction("Open profiles folder", lambda: open_path(resolve("profiles")))
+        menu.addAction("Open app log", lambda: open_path(ROOT / "data" / "logs"))
+        menu.addAction("Edit config", lambda: open_path(ROOT / "config.yaml"))
         menu.addSeparator()
         menu.addAction("End call && quit", self.quit)
         self.tray.setContextMenu(menu)
@@ -1163,12 +1170,12 @@ The last speaker just asked something. Should {name} be the one to answer? YES i
             menu.addSeparator()
         for d in docs:
             sub = menu.addMenu(d.label)
-            sub.addAction("Open", lambda p=d.path: os.startfile(p))
+            sub.addAction("Open", lambda p=d.path: open_path(p))
             sub.addAction("Remove from Cue", lambda d=d: self._remove_doc(d))
 
     def _open_docs_folder(self):
         doclib.DOCS.mkdir(parents=True, exist_ok=True)
-        os.startfile(doclib.DOCS)
+        open_path(doclib.DOCS)
 
     def _remove_doc(self, d):
         try:

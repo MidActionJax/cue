@@ -207,6 +207,8 @@ worklog:
   daily_model: haiku          # one call per active day — haiku keeps backfills light on usage limits
   model: sonnet               # weekly summaries + the two main docs
   parallel: 2                 # concurrent claude -p calls during backfill
+  daily_job: true             # macOS app: refresh the brief at 7:30 every morning (a launchd agent).
+                              # Windows: chosen in the installer (Task Scheduler)
 
 # SBIR mode: import your pipeline spreadsheets into profiles/sbir/contacts.md (read-only, the
 # files are never written). Empty = off. Runs at the end of the daily job, or: cue-cli sbir-sync

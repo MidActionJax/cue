@@ -1,7 +1,7 @@
-"""Glassmorphic always-on-top panel with a Mac-style title bar (PyQt6 + Win32).
+"""Glassmorphic always-on-top panel with a Mac-style title bar (PyQt6; native bits in plat.window).
 
-The panel never takes keyboard focus (WS_EX_NOACTIVATE), so clicking it or dragging it
-around doesn't pull focus away from the call app.
+The panel never takes keyboard focus (Windows: WS_EX_NOACTIVATE; macOS: a non-activating
+NSPanel), so clicking it or dragging it around doesn't pull focus away from the call app.
 
     ●●●  Cue · Listening           [ Work | Interview ]  name   ⚡ Ask
     ─────────────────────────────────────────────────────────────────────────
@@ -10,11 +10,9 @@ around doesn't pull focus away from the call app.
 """
 from __future__ import annotations
 
-import ctypes
 import html
 import json
 import logging
-from ctypes import wintypes
 from urllib.parse import unquote
 
 from PyQt6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QRectF, Qt, QTimer, pyqtSignal
@@ -23,54 +21,15 @@ from PyQt6.QtWidgets import (QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushB
                              QVBoxLayout, QWidget)
 
 from .config import ASSETS, DATA
+from .plat import window
 
 log = logging.getLogger(__name__)
 
-user32 = ctypes.windll.user32
-dwmapi = ctypes.windll.dwmapi
-
-GWL_EXSTYLE = -20
-WS_EX_TOOLWINDOW = 0x00000080
-WS_EX_NOACTIVATE = 0x08000000
-WS_EX_APPWINDOW = 0x00040000
-WDA_EXCLUDEFROMCAPTURE = 0x11
-DWMWA_WINDOW_CORNER_PREFERENCE = 33
-DWMWCP_ROUND = 2
 UI_STATE = DATA / "ui_state.json"
 
 TEXT = "#F4F7FB"
 MUTED = "rgba(210,220,235,150)"
 ACCENT = "#8fb4ff"
-
-
-class _ACCENT_POLICY(ctypes.Structure):
-    _fields_ = [("AccentState", ctypes.c_int), ("AccentFlags", ctypes.c_int),
-                ("GradientColor", ctypes.c_uint), ("AnimationId", ctypes.c_int)]
-
-
-class _WINCOMPATTRDATA(ctypes.Structure):
-    _fields_ = [("Attribute", ctypes.c_int), ("Data", ctypes.c_void_p), ("SizeOfData", ctypes.c_size_t)]
-
-
-def _enable_acrylic(hwnd: int, rgb: QColor, alpha: int) -> bool:
-    """Native frosted-glass blur behind the window (SetWindowCompositionAttribute)."""
-    try:
-        accent = _ACCENT_POLICY()
-        accent.AccentState = 4  # ACCENT_ENABLE_ACRYLICBLURBEHIND
-        accent.AccentFlags = 2
-        accent.GradientColor = (alpha << 24) | (rgb.blue() << 16) | (rgb.green() << 8) | rgb.red()
-        data = _WINCOMPATTRDATA()
-        data.Attribute = 19  # WCA_ACCENT_POLICY
-        data.SizeOfData = ctypes.sizeof(accent)
-        data.Data = ctypes.cast(ctypes.pointer(accent), ctypes.c_void_p)
-        ok = user32.SetWindowCompositionAttribute(wintypes.HWND(hwnd), ctypes.byref(data))
-        pref = ctypes.c_int(DWMWCP_ROUND)
-        dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd), DWMWA_WINDOW_CORNER_PREFERENCE,
-                                     ctypes.byref(pref), ctypes.sizeof(pref))
-        return bool(ok)
-    except Exception as e:
-        log.warning("acrylic unavailable: %s", e)
-        return False
 
 
 # ---------------------------------------------------------------------------- widgets
@@ -276,29 +235,16 @@ class GlassWindow(QWidget):
 
     def __init__(self, cfg, taskbar: bool | None = None):
         self._taskbar = cfg.get("show_in_taskbar", True) if taskbar is None else taskbar
-        flags = (Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
-                 | Qt.WindowType.WindowDoesNotAcceptFocus)
-        if not self._taskbar:
-            flags |= Qt.WindowType.Tool
-        super().__init__(None, flags)
+        super().__init__(None, window.base_flags(self._taskbar))
         self.cfg = cfg
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        window.prepare_widget(self)
         self.tint = QColor(cfg.tint)
         self.acrylic = False
 
     def showEvent(self, e):
         super().showEvent(e)
-        hwnd = int(self.winId())
-        ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-        # never steal focus; with show_in_taskbar Cue gets a taskbar button with its icon
-        ex |= WS_EX_NOACTIVATE
-        ex = (ex | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW if self._taskbar else ex | WS_EX_TOOLWINDOW
-        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
-        if self.cfg.hide_from_screen_share:
-            user32.SetWindowDisplayAffinity(wintypes.HWND(hwnd), WDA_EXCLUDEFROMCAPTURE)
-        if self.cfg.acrylic and not self.acrylic:
-            self.acrylic = _enable_acrylic(hwnd, self.tint, self.cfg.tint_alpha)
+        # never steal focus, stay on top, left out of screen sharing; Windows: acrylic blur
+        self.acrylic = window.on_show(self, self.cfg, self._taskbar, self.tint, self.cfg.tint_alpha, self.acrylic)
 
     def paint_glass(self, p: QPainter) -> None:
         p.setRenderHint(QPainter.RenderHint.Antialiasing)

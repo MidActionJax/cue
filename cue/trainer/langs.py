@@ -6,7 +6,7 @@ Commands are argv lists with placeholders, filled in by the runner:
     {harness}  the test driver next to it (function-style problems)
     {main}     what gets built/run: the harness for function-style problems, your file for stdin-style
     {files}    every source file in the build folder (your file + the harness)
-    {dir}      the build folder           {exe}  dir/prog.exe
+    {dir}      the build folder           {exe}  dir/prog.exe (dir/prog on macOS)
 
 `wiring` says how the harness reaches your code: "include" (the harness includes/imports your
 file), "separate" (both files are compiled together), "append" (your code then the harness, one
@@ -20,10 +20,13 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+IS_WIN, IS_MAC = sys.platform == "win32", sys.platform == "darwin"
 
 
 @dataclass
@@ -196,16 +199,98 @@ def find(name: str) -> Language | None:
 
 # ---------------------------------------------------------------------------- toolchain detection
 
-EXTRA_DIRS = [r"C:\Program Files\Go\bin", r"C:\msys64\ucrt64\bin", r"C:\msys64\mingw64\bin",
-              r"C:\MinGW\bin", r"C:\Program Files\LLVM\bin", r"C:\Strawberry\c\bin", r"C:\Strawberry\perl\bin",
-              r"C:\Ruby33-x64\bin", r"C:\Ruby32-x64\bin", r"C:\tools\php", r"C:\php",
-              os.path.expandvars(r"%USERPROFILE%\.cargo\bin"), os.path.expandvars(r"%USERPROFILE%\go\bin"),
-              os.path.expandvars(r"%LOCALAPPDATA%\Programs\Julia\bin"), os.path.expandvars(r"%USERPROFILE%\.deno\bin"),
-              os.path.expandvars(r"%APPDATA%\npm"), os.path.expandvars(r"%JAVA_HOME%\bin"),
-              # winget: command links, and zip packages like WinLibs (GCC) unpacked under Packages
-              os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Links")]
+if IS_WIN:
+    EXTRA_DIRS = [r"C:\Program Files\Go\bin", r"C:\msys64\ucrt64\bin", r"C:\msys64\mingw64\bin",
+                  r"C:\MinGW\bin", r"C:\Program Files\LLVM\bin", r"C:\Strawberry\c\bin", r"C:\Strawberry\perl\bin",
+                  r"C:\Ruby33-x64\bin", r"C:\Ruby32-x64\bin", r"C:\tools\php", r"C:\php",
+                  os.path.expandvars(r"%USERPROFILE%\.cargo\bin"), os.path.expandvars(r"%USERPROFILE%\go\bin"),
+                  os.path.expandvars(r"%LOCALAPPDATA%\Programs\Julia\bin"), os.path.expandvars(r"%USERPROFILE%\.deno\bin"),
+                  os.path.expandvars(r"%APPDATA%\npm"), os.path.expandvars(r"%JAVA_HOME%\bin"),
+                  # winget: command links, and zip packages like WinLibs (GCC) unpacked under Packages
+                  os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Links")]
+else:
+    _home = str(Path.home())
+    EXTRA_DIRS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/local/go/bin", "/opt/homebrew/opt/openjdk/bin",
+                  "/opt/homebrew/opt/ruby/bin", f"{_home}/.cargo/bin", f"{_home}/go/bin", f"{_home}/.deno/bin",
+                  f"{_home}/.dotnet", f"{_home}/.juliaup/bin", f"{_home}/.ghcup/bin", f"{_home}/.local/bin",
+                  f"{_home}/.npm-global/bin", f"{_home}/.bun/bin"]
+    if os.environ.get("JAVA_HOME"):
+        EXTRA_DIRS.append(os.path.join(os.environ["JAVA_HOME"], "bin"))
 WINGET_GCC = r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\BrechtSanders.WinLibs*\mingw64\bin"
 _found: dict[str, str | None] = {}
+
+# macOS ships stubs in /usr/bin for the developer tools: running one without the Command Line
+# Tools (or a JDK, for java) installed pops up an install dialog instead of doing anything.
+XCODE_STUBS = {"clang", "clang++", "gcc", "g++", "cc", "c++", "swiftc", "swift", "python3", "git", "make"}
+_mac_ok: dict[str, bool] = {}
+
+
+def _mac_stub_ok(tool: str, path: str) -> bool:
+    if not IS_MAC or not path.startswith("/usr/bin/"):
+        return True
+    if tool in ("java", "javac"):
+        probe = ["/usr/libexec/java_home"]
+    elif tool in XCODE_STUBS:
+        probe = ["xcode-select", "-p"]
+    else:
+        return True
+    key = probe[0]
+    if key not in _mac_ok:
+        try:
+            _mac_ok[key] = subprocess.run(probe, capture_output=True, timeout=10).returncode == 0
+        except Exception:
+            _mac_ok[key] = False
+    return _mac_ok[key]
+
+
+# Apple's clang has no <bits/stdc++.h> (a GCC extra that interview code uses all the time); Cue
+# puts one on the include path, in a hidden folder in the build directory.
+STDCPP_SHIM = """#pragma once
+#include <algorithm>
+#include <array>
+#include <bitset>
+#include <cassert>
+#include <cctype>
+#include <climits>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <deque>
+#include <functional>
+#include <iomanip>
+#include <iostream>
+#include <iterator>
+#include <limits>
+#include <list>
+#include <map>
+#include <memory>
+#include <numeric>
+#include <optional>
+#include <queue>
+#include <random>
+#include <set>
+#include <sstream>
+#include <stack>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+"""
+SHIM_DIR = ".inc"
+
+
+def prepare_dir(lang: Language, d: Path) -> None:
+    """Anything a build folder needs besides the sources (macOS: the <bits/stdc++.h> shim)."""
+    if IS_MAC and lang.key == "cpp":
+        p = d / SHIM_DIR / "bits" / "stdc++.h"
+        if not p.exists():
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(STDCPP_SHIM, encoding="utf-8")
 
 
 def which(tool: str) -> str | None:
@@ -229,6 +314,8 @@ def which(tool: str) -> str | None:
     if path and path.lower().endswith(".exe"):
         # winget's Links are symlinks; GCC finds its own parts relative to where the real exe lives
         path = os.path.realpath(path)
+    if path and not _mac_stub_ok(tool, path):
+        path = None
     if path and tool == "dotnet" and not _dotnet_sdk(path):
         path = None   # the runtime alone can't build
     if path and tool == "javac" and not os.path.isfile(path):
@@ -252,7 +339,14 @@ def toolchain(lang: Language) -> Toolchain | None:
         paths = {t: which(t) for t in tc.tools}
         if all(paths.values()):
             def fill(cmd):
-                return [paths.get(c, c) for c in cmd] if cmd else None
+                if not cmd:
+                    return None
+                out = [paths.get(c, c) for c in cmd]
+                if not IS_WIN:   # macOS can't link fully static programs (and doesn't need to)
+                    out = [c for c in out if c != "-static"]
+                if IS_MAC and lang.key == "cpp" and cmd[0] in ("g++", "clang++"):
+                    out.insert(1, "-I{dir}/" + SHIM_DIR)
+                return out
             # a command's first word may be a tool that isn't in `tools` (e.g. java for kotlin's jar)
             return Toolchain(tc.tools, fill(tc.build), fill(tc.run), fill(tc.check))
     if lang.key == "python":   # no Python installed: Cue's own interpreter runs it
@@ -268,6 +362,9 @@ def runnable(lang: Language) -> bool:
 def refresh() -> None:
     """Look for toolchains again (one may have been installed while Cue was running)."""
     _found.clear()
+    _mac_ok.clear()
+    if not IS_WIN:
+        return
     for d in glob.glob(os.path.expandvars(WINGET_GCC)):
         if d not in EXTRA_DIRS:
             EXTRA_DIRS.append(d)

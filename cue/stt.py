@@ -64,15 +64,15 @@ class Transcriber:
         self.ready = threading.Event()
 
     def load(self) -> None:
-        from faster_whisper import WhisperModel
+        from . import asr
 
         t = time.time()
         try:
-            self.model = WhisperModel(self.cfg.model, device=self.cfg.device, compute_type=self.cfg.compute_type)
+            self.model = asr.load(self.cfg.model, self.cfg.device, self.cfg.compute_type)
         except Exception as e:  # CUDA libs missing etc. — still work, just slower
-            log.error("Whisper on %s failed (%s); falling back to CPU int8 'small'", self.cfg.device, e)
-            self.model = WhisperModel("small", device="cpu", compute_type="int8")
-        log.info("Whisper %s loaded in %.1fs", self.cfg.model, time.time() - t)
+            log.error("Whisper %s (%s) failed (%s); falling back to 'small'", self.cfg.model, asr.engine(), e)
+            self.model = asr.load_cpu_fallback()
+        log.info("Whisper %s loaded in %.1fs (%s)", self.cfg.model, time.time() - t, asr.engine())
         # warm-up so the first real utterance isn't slow
         import numpy as np
         list(self.model.transcribe(np.zeros(16000, dtype="float32"), language=self.cfg.language)[0])
@@ -83,10 +83,10 @@ class Transcriber:
             threading.Thread(target=self._load_accurate, name="stt-accurate", daemon=True).start()
 
     def _load_accurate(self) -> None:
-        from faster_whisper import WhisperModel
+        from . import asr
         t = time.time()
         try:
-            model = WhisperModel(self.cfg.accurate_model, device=self.cfg.device, compute_type=self.cfg.compute_type)
+            model = asr.load(self.cfg.accurate_model, self.cfg.device, self.cfg.compute_type)
             self.accurate = model
             log.info("accurate model %s ready in %.1fs (for %s)", self.cfg.accurate_model, time.time() - t,
                      ", ".join(self.cfg.accurate_speakers))
