@@ -36,7 +36,6 @@ binaries += collect_dynamic_libs("mlx")
 
 hiddenimports = (collect_submodules("cue") + collect_submodules("worklog")
                  + collect_submodules("mlx_whisper") + collect_submodules("mlx")
-                 + collect_submodules("pynput")   # picks its backend (pynput._util.darwin) at runtime
                  + ["webrtcvad", "soxr", "sounddevice", "anthropic", "httpx", "pypdf", "yaml",
                     "PyQt6.QtNetwork", "openpyxl", "objc", "Foundation", "AppKit", "Quartz",
                     "ApplicationServices", "CoreMedia", "ScreenCaptureKit"]

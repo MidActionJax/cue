@@ -204,7 +204,7 @@ app and that task and **leaves your data folder alone**. Upgrading keeps everyth
    |---|---|
    | **Microphone** | your side of the call |
    | **Screen & System Audio Recording** | the other people's voices. Cue records audio only, never your screen |
-   | **Accessibility** (and **Input Monitoring** if listed) | the global `Tab` / shortcut keys |
+   | **Input Monitoring** | the global `Tab` / shortcut keys (Cue only checks for its own shortcuts) |
 
 Your data goes in `~/Cue` (to put it elsewhere, write a folder path into
 `~/Library/Application Support/Cue/cue_home.txt`). Transcription runs on the Mac's GPU with

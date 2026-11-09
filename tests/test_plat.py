@@ -54,6 +54,22 @@ def test_hotkey_parse(combo, want):
     assert hotkeys.parse(combo) == want
 
 
+def test_mac_modifier_flags():
+    assert hotkeys.mods_from_flags(0) == frozenset()
+    # ctrl+alt with caps lock (0x10000) and the numeric-pad bit (0x200000) on: those two are ignored
+    assert hotkeys.mods_from_flags(0x40000 | 0x80000 | 0x10000 | 0x200000) == frozenset({"ctrl", "alt"})
+    assert hotkeys.MAC_VK["tab"] == 48
+
+
+def test_every_default_hotkey_maps_on_mac():
+    from cue import config
+    cfg = config.load(config.APP_DIR / "config.example.yaml")
+    combos = list(cfg["hotkeys"].values()) + list(cfg["trainer"]["hotkeys"].values())
+    for combo in combos:
+        _, key = hotkeys.parse(combo)
+        assert key in hotkeys.MAC_VK, combo
+
+
 def test_hotkey_parse_rejects_two_keys():
     with pytest.raises(ValueError):
         hotkeys.parse("a+b")

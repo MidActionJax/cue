@@ -23,7 +23,6 @@ nvidia-cudnn-cu12==9.*; sys_platform == "win32"
 # capture (ScreenCaptureKit) and the floating panel (AppKit)
 mlx-whisper; sys_platform == "darwin"
 sounddevice; sys_platform == "darwin"
-pynput; sys_platform == "darwin"
 pyobjc-core; sys_platform == "darwin"
 pyobjc-framework-Cocoa; sys_platform == "darwin"
 pyobjc-framework-Quartz; sys_platform == "darwin"

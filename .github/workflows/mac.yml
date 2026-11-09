@@ -46,7 +46,7 @@ jobs:
           from cue.plat.audio_mac import _output_class
           import objc, ScreenCaptureKit, CoreMedia
           _output_class()   # the ScreenCaptureKit audio receiver class can be defined
-          import mlx.core as mx, mlx_whisper, sounddevice, pynput.keyboard
+          import mlx.core as mx, mlx_whisper, sounddevice, Quartz
           print("imports ok; mlx device:", mx.default_device())
           EOF
 

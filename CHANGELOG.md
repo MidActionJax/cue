@@ -18,7 +18,7 @@
   is found even without the `code` command installed.
 - The worklog also reads Claude desktop (Cowork) sessions from their Mac location.
 - Permissions to grant (then reopen Cue): Microphone, Screen & System Audio Recording,
-  Accessibility. See the README.
+  Input Monitoring. See the README.
 
 ### Under the hood
 - Everything OS-specific now lives in `cue/plat/` (audio backends, hotkeys, window styling,

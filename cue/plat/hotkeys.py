@@ -1,8 +1,10 @@
 """Global hotkeys ("tab", "shift+tab", "ctrl+alt+m") that never swallow the key.
 
-Windows: the `keyboard` library. macOS: one pynput listener (a Quartz event tap), which needs
-the Accessibility permission (System Settings > Privacy & Security > Accessibility). Keys are
-matched by physical key code there, because Option changes the character ("option+m" types µ).
+Windows: the `keyboard` library. macOS: one listen-only Quartz event tap on its own thread,
+which needs the Input Monitoring permission (System Settings > Privacy & Security > Input
+Monitoring). Keys are matched by physical key code and modifier flags there, because Option
+changes the character ("option+m" types µ). Only those two numbers are read from each event:
+asking macOS for the typed character off the main thread crashes on recent macOS versions.
 """
 from __future__ import annotations
 
@@ -44,19 +46,22 @@ class Hotkeys:
     def __init__(self):
         self._ids = itertools.count(1)
         self._win: dict[int, object] = {}
-        self._mac: dict[int, tuple[frozenset[str], str, Callable]] = {}
+        self._mac: dict[int, tuple[frozenset[str], int, Callable]] = {}
         self._lock = threading.Lock()
-        self._listener = None
-        self._down: set[str] = set()
+        self._thread: threading.Thread | None = None
+        self._loop = None
+        self._tap = None
 
     # ------------------------------------------------------------------ public
     def add(self, combo: str, callback: Callable[[], None]) -> int:
         hid = next(self._ids)
         if IS_MAC:
             mods, key = parse(combo)
+            if key not in MAC_VK:
+                raise ValueError(f"hotkey {combo!r}: unknown key {key!r} on macOS")
             with self._lock:
-                self._mac[hid] = (mods, key, callback)
-            self._ensure_listener()
+                self._mac[hid] = (mods, MAC_VK[key], callback)
+            self._ensure_tap()
         else:
             import keyboard
             # suppress=False: the key still reaches whatever app you're in
@@ -75,76 +80,83 @@ class Hotkeys:
                 pass
 
     def stop(self) -> None:
-        if self._listener is not None:
-            self._listener.stop()
-            self._listener = None
+        if self._loop is not None:
+            import Quartz as Q
+            Q.CFRunLoopStop(self._loop)
+            self._loop = None
 
     # ------------------------------------------------------------------ macOS
-    def _ensure_listener(self) -> None:
-        if self._listener is not None:
+    def _ensure_tap(self) -> None:
+        if self._thread is not None:
             return
-        from pynput import keyboard as kb
-        self._kb = kb
-        self._listener = kb.Listener(on_press=self._press, on_release=self._release)
-        self._listener.daemon = True
-        self._listener.start()
         if not input_monitoring_allowed(prompt=True):
-            log.warning("hotkeys need the Accessibility permission: System Settings > Privacy & Security > "
-                        "Accessibility > turn on Cue, then restart Cue")
+            log.warning(PERMISSION_HELP)
+        self._thread = threading.Thread(target=self._run_tap, name="hotkeys", daemon=True)
+        self._thread.start()
 
-    def _mod(self, key) -> str | None:
-        K = self._kb.Key
-        for name, members in (("ctrl", (K.ctrl, K.ctrl_l, K.ctrl_r)), ("alt", (K.alt, K.alt_l, K.alt_r)),
-                              ("shift", (K.shift, K.shift_l, K.shift_r)), ("cmd", (K.cmd, K.cmd_l, K.cmd_r))):
-            if key in members:
-                return name
-        return None
+    def _run_tap(self) -> None:
+        import Quartz as Q
+        mask = Q.CGEventMaskBit(Q.kCGEventKeyDown)
 
-    def _name(self, key) -> str | None:
-        """Our name for a non-modifier key, from its physical key code."""
-        vk = getattr(key, "vk", None)
-        if vk is None and hasattr(key, "value"):
-            vk = getattr(key.value, "vk", None)
-        if vk is not None:
-            for name, code in MAC_VK.items():
-                if code == vk:
-                    return name
-        char = getattr(key, "char", None)
-        return char.lower() if char else getattr(key, "name", None)
+        def on_event(proxy, etype, event, refcon):
+            try:
+                if etype in (Q.kCGEventTapDisabledByTimeout, Q.kCGEventTapDisabledByUserInput):
+                    Q.CGEventTapEnable(self._tap, True)   # macOS turns a slow tap off; turn it back on
+                elif etype == Q.kCGEventKeyDown and not Q.CGEventGetIntegerValueField(event, Q.kCGKeyboardEventAutorepeat):
+                    self._dispatch(Q.CGEventGetIntegerValueField(event, Q.kCGKeyboardEventKeycode),
+                                   Q.CGEventGetFlags(event))
+            except Exception:
+                log.exception("hotkey event")
+            return event
 
-    def _press(self, key) -> None:
-        try:
-            m = self._mod(key)
-            if m:
-                self._down.add(m)
-                return
-            name = self._name(key)
-            if not name:
-                return
-            mods = frozenset(self._down)
-            with self._lock:
-                hits = [cb for (want_mods, k, cb) in self._mac.values() if k == name and want_mods == mods]
-            for cb in hits:
-                cb()
-        except Exception:
-            log.exception("hotkey handler failed")
+        self._tap = Q.CGEventTapCreate(Q.kCGSessionEventTap, Q.kCGHeadInsertEventTap,
+                                       Q.kCGEventTapOptionListenOnly, mask, on_event, None)
+        if self._tap is None:
+            log.warning("hotkeys are off: %s", PERMISSION_HELP)
+            self._thread = None
+            return
+        source = Q.CFMachPortCreateRunLoopSource(None, self._tap, 0)
+        self._loop = Q.CFRunLoopGetCurrent()
+        Q.CFRunLoopAddSource(self._loop, source, Q.kCFRunLoopCommonModes)
+        Q.CGEventTapEnable(self._tap, True)
+        log.info("hotkeys: listening (%d)", len(self._mac))
+        Q.CFRunLoopRun()
 
-    def _release(self, key) -> None:
-        m = self._mod(key)
-        if m:
-            self._down.discard(m)
+    def _dispatch(self, keycode: int, flags: int) -> None:
+        mods = mods_from_flags(flags)
+        with self._lock:
+            hits = [cb for (want, code, cb) in self._mac.values() if code == keycode and want == mods]
+        for cb in hits:   # off the tap's thread: a slow callback would get the tap switched off
+            threading.Thread(target=_safe_call, args=(cb,), daemon=True).start()
+
+
+# CGEventFlags bits for the modifiers
+MAC_FLAGS = {"shift": 0x20000, "ctrl": 0x40000, "alt": 0x80000, "cmd": 0x100000}
+PERMISSION_HELP = ("Cue's shortcut keys need the Input Monitoring permission: System Settings > Privacy & "
+                   "Security > Input Monitoring > turn on Cue, then quit and reopen Cue")
+
+
+def mods_from_flags(flags: int) -> frozenset[str]:
+    return frozenset(name for name, bit in MAC_FLAGS.items() if flags & bit)
+
+
+def _safe_call(cb: Callable[[], None]) -> None:
+    try:
+        cb()
+    except Exception:
+        log.exception("hotkey handler failed")
 
 
 def input_monitoring_allowed(prompt: bool = False) -> bool:
-    """macOS: may this app see keystrokes system-wide (Accessibility)? prompt=True also shows
-    macOS's own dialog that opens the right settings page. Always True elsewhere."""
+    """macOS: may this app see keystrokes system-wide (Input Monitoring)? prompt=True also shows
+    macOS's own dialog the first time. Always True elsewhere."""
     if not IS_MAC:
         return True
     try:
-        import ApplicationServices as AS
+        import Quartz as Q
         if prompt:
-            return bool(AS.AXIsProcessTrustedWithOptions({AS.kAXTrustedCheckOptionPrompt: True}))
-        return bool(AS.AXIsProcessTrusted())
+            return bool(Q.CGRequestListenEventAccess())
+        return bool(Q.CGPreflightListenEventAccess())
     except Exception as e:
-        log.debug("accessibility check: %s", e)
+        log.debug("input monitoring check: %s", e)
         return True
