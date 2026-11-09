@@ -32,7 +32,8 @@ jobs:
           python -m pip install --upgrade pip
           # setuptools 80+ trims pkg_resources, which breaks PyInstaller's runtime hook for it
           # (webrtcvad imports pkg_resources); the Windows build uses 65 too
-          python -m pip install -r requirements.txt pyinstaller pytest "setuptools<70"
+          python -m pip install -r requirements.txt pyinstaller pytest
+          python -m pip install "setuptools<70"
 
       - name: Speaker model
         run: |
