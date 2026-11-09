@@ -109,6 +109,9 @@ NSFloatingWindowLevel = 3
 
 
 def _mac(widget, cfg) -> None:
+    from PyQt6.QtGui import QGuiApplication
+    if QGuiApplication.platformName() != "cocoa":
+        return   # e.g. the offscreen platform (tests, CI): winId() isn't an NSView there
     import objc
     view = objc.objc_object(c_void_p=int(widget.winId()))
     win = view.window()

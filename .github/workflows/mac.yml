@@ -84,9 +84,11 @@ jobs:
           kill -TERM $PID || true
           sleep 3
           kill -9 $PID 2>/dev/null || true
-          cat "$RUNNER_TEMP/demo.log" | tail -40
+          tail -40 "$RUNNER_TEMP/demo.log"
+          cat ci-home/data/logs/crash.log 2>/dev/null | tail -60 || true
           LOG=$(ls -t ci-home/data/logs/app-*.log | head -1)
           tail -40 "$LOG"
+          ! grep -q "Fatal Python error\|Segmentation fault" "$RUNNER_TEMP/demo.log"
           ! grep -q "uncaught error" "$LOG"
           test -s "$LOG"
 
