@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds Cue.app and Cue-<version>-mac-arm64.dmg on an Apple Silicon Mac (or the macos-14 runner).
 #   bash packaging/build-mac.sh [OUT_DIR]       (default: ./build-mac)
-# Needs: python3 -m pip install -r requirements.txt pyinstaller, and
+# Needs: python3 -m pip install -r requirements.txt pyinstaller "setuptools<70", and
 #        models/wespeaker_en_voxceleb_resnet34_LM.onnx in the repo.
 # The app is ad-hoc signed, not notarized: the first open is right-click > Open.
 set -euo pipefail
